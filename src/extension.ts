@@ -134,6 +134,30 @@ function findPiBinary(): string {
   return "pi";
 }
 
+/** Find a column that already has a Pi terminal tab */
+function findPiColumn(): vscode.ViewColumn | undefined {
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      if (tab.input instanceof vscode.TabInputTerminal && tab.label === "Pi") {
+        return group.viewColumn;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Find the first editor column with no tabs */
+function findUnusedColumn(): vscode.ViewColumn | undefined {
+  const used = new Set<vscode.ViewColumn>();
+  for (const group of vscode.window.tabGroups.all) {
+    if (group.viewColumn !== undefined) used.add(group.viewColumn);
+  }
+  for (let col = vscode.ViewColumn.One; col <= vscode.ViewColumn.Nine; col++) {
+    if (!used.has(col)) return col;
+  }
+  return undefined;
+}
+
 let piExistsCache: boolean | undefined;
 
 async function createNewTerminal(): Promise<vscode.Terminal | undefined> {
@@ -166,7 +190,10 @@ async function createNewTerminal(): Promise<vscode.Terminal | undefined> {
 
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
-  return vscode.window.createTerminal({
+  // Find a column that already has a Pi terminal, or use an unused one
+  const viewColumn = findPiColumn() ?? findUnusedColumn() ?? vscode.ViewColumn.Beside;
+
+  const terminal = vscode.window.createTerminal({
     name: "Pi",
     shellPath: piPath,
     cwd,
@@ -175,7 +202,12 @@ async function createNewTerminal(): Promise<vscode.Terminal | undefined> {
       dark: vscode.Uri.joinPath(extensionUri, "assets", "logo.svg"),
     },
     location: {
-      viewColumn: vscode.ViewColumn.Beside,
+      viewColumn,
     },
   });
+
+  // Lock the editor group so Pi doesn't get displaced by file opens
+  vscode.commands.executeCommand("workbench.action.lockEditorGroup");
+
+  return terminal;
 }
