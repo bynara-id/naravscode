@@ -14,7 +14,8 @@ Minimal VS Code extension for [pi coding agent](https://pi.dev/).
 - **Package manager** — Browse, search, install, and uninstall pi packages from the sidebar with live output streaming and cancel support; automatically detects package capabilities (extensions, skills, prompts, themes)
 - **Auto-detection** — Finds the pi binary automatically from common paths (`~/.bun/bin`, `~/.local/bin`, `~/.npm-global/bin`)
 
-<img width="1010" height="577" alt="Screenshot_20260226_195233" src="https://github.com/user-attachments/assets/17da86c1-3890-454e-9f4a-8faf4ef78ee4" />
+<img width="945" height="725" alt="image" src="https://github.com/user-attachments/assets/91dbaca4-6d27-490a-8395-94a9c4d07625" />
+
 
 ## Requirements
 
