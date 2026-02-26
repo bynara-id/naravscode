@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -34,23 +35,21 @@ jobs:
 
   publish:
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: pi-vscode
 
-      - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v6
         with:
           node-version: lts/*
 
-      - run: pnpx @vscode/vsce publish --packagePath *.vsix
+      - run: npx @vscode/vsce publish --packagePath *.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
-      - run: pnpx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}
+      - run: npx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}
         env:
           OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}

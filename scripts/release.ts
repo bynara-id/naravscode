@@ -29,13 +29,15 @@ const run = (cmd: string) => {
   execSync(cmd, { cwd: rootDir, stdio: "inherit" });
 };
 
+const isLocal = process.argv.includes("--local");
+
 // Clean old .vsix files
 for (const vsix of globSync("*.vsix", { cwd: rootDir })) {
   console.log(`Removing old ${vsix}`);
   execSync(`rm ${vsix}`, { cwd: rootDir });
 }
 
-// Package once, then publish to both registries
+// Package once
 run("pnpm package");
 
 const [vsixFile] = globSync("*.vsix", { cwd: rootDir });
@@ -44,14 +46,18 @@ if (!vsixFile) {
   process.exit(1);
 }
 
-console.log(`\nPublishing ${vsixFile}...`);
-run(`vsce publish --no-dependencies -i ${vsixFile}`);
-run(`ovsx publish ${vsixFile}`);
+// Git tag and push (CI handles publishing)
+run(`git add -A`);
+run(`git commit -m "v${nextVersion}"`);
+run(`git tag v${nextVersion}`);
+run(`git push`);
+run(`git push --tags`);
 
-// run(`git add -A`);
-// run(`git commit -m "v${nextVersion}"`);
-// run(`git tag v${nextVersion}`);
-// run(`git push`);
-// run(`git push --tags`);
+// Publish locally if --local flag is passed
+if (isLocal) {
+  console.log(`\nPublishing ${vsixFile} locally...`);
+  run(`vsce publish --no-dependencies -i ${vsixFile}`);
+  run(`ovsx publish ${vsixFile}`);
+}
 
 console.log(`\n✅ Released v${nextVersion}`);
