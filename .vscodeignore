@@ -1,0 +1,11 @@
+**/*
+!dist/extension.cjs
+!dist/webview.js
+!dist/webview.css
+!assets/fonts/**
+!assets/icon.png
+!assets/logo.svg
+!assets/logo-light.svg
+!README.md
+!CHANGELOG.md
+!LICENSE

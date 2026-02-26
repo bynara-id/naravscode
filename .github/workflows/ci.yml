@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: picode-vsix
+          path: "*.vsix"
+
+  # publish:
+  #   needs: build
+  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: picode-vsix
+
+  #     - uses: pnpm/action-setup@v4
+
+  #     - uses: actions/setup-node@v6
+  #       with:
+  #         node-version: 22
+
+  #     - run: pnpx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}
+  #       env:
+  #         OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
