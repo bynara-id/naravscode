@@ -90,7 +90,9 @@ const chatHandler: vscode.ChatRequestHandler = async (request, _context, stream,
 
   const t = await createNewTerminal();
   if (!t) {
-    stream.markdown("Pi is not installed. Please install it with `npm i -g @mariozechner/pi-coding-agent`.");
+    stream.markdown(
+      "Pi is not installed. Please install it with `npm i -g @mariozechner/pi-coding-agent`.",
+    );
     return;
   }
   t.sendText(message);
@@ -145,9 +147,9 @@ async function createNewTerminal(): Promise<vscode.Terminal | undefined> {
 
   if (!piExistsCache) {
     const commands: Record<string, string> = {
-      "npm": "npm i -g @mariozechner/pi-coding-agent",
-      "bun": "bun i -g @mariozechner/pi-coding-agent",
-      "pnpm": "pnpm i -g @mariozechner/pi-coding-agent",
+      npm: "npm i -g @mariozechner/pi-coding-agent",
+      bun: "bun i -g @mariozechner/pi-coding-agent",
+      pnpm: "pnpm i -g @mariozechner/pi-coding-agent",
     };
     const action = await vscode.window.showErrorMessage(
       "Pi binary not found. Install it globally?",
@@ -157,7 +159,7 @@ async function createNewTerminal(): Promise<vscode.Terminal | undefined> {
       piExistsCache = undefined;
       const t = vscode.window.createTerminal({ name: "Install Pi" });
       t.show();
-      t.sendText(commands[action]);
+      t.sendText(commands[action]!);
     }
     return undefined;
   }

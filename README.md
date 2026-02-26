@@ -33,11 +33,11 @@ ovsx get pi0.pi-vscode
 
 ## Commands
 
-| Command              | Keybinding   | Description                       |
-| -------------------- | ------------ | --------------------------------- |
-| `Pi: Open`           | `Ctrl+Alt+3` | Open or focus the pi terminal     |
+| Command              | Keybinding       | Description                       |
+| -------------------- | ---------------- | --------------------------------- |
+| `Pi: Open`           | `Ctrl+Alt+3`     | Open or focus the pi terminal     |
 | `Pi: Open with File` | Editor title bar | Open pi with current file context |
-| `Pi: Send Selection` | —            | Send selected text to pi terminal |
+| `Pi: Send Selection` | —                | Send selected text to pi terminal |
 
 ## Sidebar
 
