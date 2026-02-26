@@ -34,9 +34,14 @@ export function activate(context: vscode.ExtensionContext) {
       if (editor) {
         const filePath = vscode.workspace.asRelativePath(editor.document.uri);
         const sel = editor.selection;
-        const range = sel.isEmpty ? `:${sel.active.line + 1}` : `:${sel.start.line + 1}-${sel.end.line + 1}`;
+        const range = sel.isEmpty
+          ? `:${sel.active.line + 1}`
+          : `:${sel.start.line + 1}-${sel.end.line + 1}`;
         const prompt = `in @${filePath}${range}`;
-        const sendPrompt = () => { terminal?.sendText("\x15", false); terminal?.sendText(prompt, false); };
+        const sendPrompt = () => {
+          terminal?.sendText("\x15", false);
+          terminal?.sendText(prompt, false);
+        };
         if (isNew) {
           // Wait for terminal process to be ready before sending text
           terminal!.processId.then(() => sendPrompt());
@@ -90,11 +95,7 @@ function findPiBinary(): string {
   if (custom) return custom;
 
   const home = process.env.HOME || process.env.USERPROFILE || "";
-  const candidates = [
-    `${home}/.bun/bin/pi`,
-    `${home}/.local/bin/pi`,
-    `${home}/.npm-global/bin/pi`,
-  ];
+  const candidates = [`${home}/.bun/bin/pi`, `${home}/.local/bin/pi`, `${home}/.npm-global/bin/pi`];
 
   for (const c of candidates) {
     try {

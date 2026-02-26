@@ -2,18 +2,16 @@
   "name": "pi-vscode",
   "displayName": "Pi Coding Agent",
   "version": "0.0.2",
-  "packageManager": "pnpm@10.30.2",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/pi0/pi-vscode"
-  },
-  "icon": "assets/icon.png",
   "description": "VS Code extension for pi coding agent",
   "categories": [
     "AI",
     "Chat"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pi0/pi-vscode"
+  },
   "publisher": "pi0",
   "type": "module",
   "main": "./dist/extension.cjs",
@@ -108,7 +106,9 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "icon": "assets/icon.png",
   "engines": {
     "vscode": "^1.93.0"
-  }
+  },
+  "packageManager": "pnpm@10.30.2"
 }
