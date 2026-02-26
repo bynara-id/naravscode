@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: lts/*
           cache: pnpm
 
       - run: pnpm install
@@ -29,24 +29,28 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: picode-vsix
+          name: pi-vscode
           path: "*.vsix"
 
-  # publish:
-  #   needs: build
-  #   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: picode-vsix
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pi-vscode
 
-  #     - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
 
-  #     - uses: actions/setup-node@v6
-  #       with:
-  #         node-version: 22
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
 
-  #     - run: pnpx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}
-  #       env:
-  #         OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
+      - run: pnpx @vscode/vsce publish --packagePath *.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - run: pnpx ovsx publish *.vsix -p ${{ secrets.OVSX_TOKEN }}
+        env:
+          OVSX_TOKEN: ${{ secrets.OVSX_TOKEN }}
