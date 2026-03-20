@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
-import { join } from "node:path";
 import * as vscode from "vscode";
+import { resolvePiBinary } from "./_resolve.ts";
 import { createPackagesViewProvider } from "./packages.ts";
 
 const TERMINAL_TITLE = "PI Code";
@@ -130,43 +130,10 @@ const chatHandler: vscode.ChatRequestHandler = async (request, _context, stream,
 
 function findPiBinary(): string {
   const config = vscode.workspace.getConfiguration("pi-vscode");
-  const custom = config.get<string>("path");
-  if (custom) return custom;
-
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  const name = process.platform === "win32" ? "pi.exe" : "pi";
-
-  // Check workspace-local node_modules/.bin first (respects monorepos / multi-root)
-  const workspaceCandidates = (vscode.workspace.workspaceFolders ?? []).map((f) =>
-    join(f.uri.fsPath, "node_modules", ".bin", name),
-  );
-
-  // Then well-known global paths
-  const candidates = [
-    ...workspaceCandidates,
-    `${home}/.bun/bin/pi`,
-    `${home}/.local/bin/pi`,
-    `${home}/.npm-global/bin/pi`,
-  ];
-  for (const c of candidates) {
-    try {
-      accessSync(c, constants.X_OK);
-      return c;
-    } catch {}
-  }
-
-  // Search OS PATH
-  const pathDirs = (process.env.PATH || "").split(process.platform === "win32" ? ";" : ":");
-  for (const dir of pathDirs) {
-    if (!dir) continue;
-    const full = join(dir, name);
-    try {
-      accessSync(full, constants.X_OK);
-      return full;
-    } catch {}
-  }
-
-  return "pi";
+  return resolvePiBinary({
+    customPath: config.get<string>("path") || undefined,
+    workspaceDirs: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+  });
 }
 
 /** Find a column that already has a Pi terminal tab */
@@ -200,7 +167,7 @@ async function createNewTerminal(args?: string[]): Promise<vscode.Terminal | und
 
   if (piExistsCache === undefined) {
     try {
-      accessSync(piPath, constants.X_OK);
+      accessSync(piPath, process.platform === "win32" ? constants.F_OK : constants.X_OK);
       piExistsCache = true;
     } catch {
       piExistsCache = false;
