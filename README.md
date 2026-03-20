@@ -7,10 +7,12 @@ Minimal VS Code extension for [pi coding agent](https://pi.dev/).
 ## Features
 
 - **Terminal-based** — Opens pi as an integrated terminal with full TUI/PTY support (opens beside the editor)
-- **Status bar button** — `$(pi-logo) Pi` button in the status bar for quick access
+- **VS Code bridge** — Bundles a pi extension and local bridge so pi can query live editor state
+- **Editor awareness** — pi can inspect the active editor, current/latest selection, open editors, workspace folders, and VS Code diagnostics (LSP / lint / type errors)
+- **Status bar button** — PI button in the status bar for quick access
 - **Open with file context** — Send current file path and line range (or cursor position) to pi, available from the editor title bar
 - **Send selection** — Send selected text directly to the pi terminal
-- **`@pi` chat participant** — Use `@pi` in VS Code Chat to forward messages to the pi terminal
+- **`@pi` chat participant** — Use `@pi` in VS Code Chat for streamed RPC-backed replies while keeping the terminal workflow for normal Pi sessions
 - **Package manager** — Browse, search, install, and uninstall pi packages from the sidebar with live output streaming and cancel support; automatically detects package capabilities (extensions, skills, prompts, themes)
 - **Auto-detection** — Finds the pi binary automatically from common paths (`~/.bun/bin`, `~/.local/bin`, `~/.npm-global/bin`)
 
@@ -18,7 +20,7 @@ Minimal VS Code extension for [pi coding agent](https://pi.dev/).
 
 ## Requirements
 
-- `pi` CLI installed (`npm i -g @mariozechner/pi-coding-agent`)
+- `pi` CLI installed (`npm i -g @mariozechner/pi-coding-agent` or `bun i -g @mariozechner/pi-coding-agent`)
 - An API key configured for at least one provider
 
 ## Install
@@ -46,6 +48,31 @@ ovsx get pi0.pi-vscode
 The **Pi** activity bar icon opens a sidebar with:
 
 - **Packages view** — Search the npm registry for `pi-package` packages, see capability labels (extensions, skills, prompts, themes), install/uninstall with live streamed output, and cancel in-progress operations
+
+## Bridge tools exposed to pi
+
+Each pi terminal launched by the extension now loads a bundled pi extension that can call back into VS Code.
+
+Available bridge tools:
+
+- `vscode_get_editor_state`
+- `vscode_get_selection`
+- `vscode_get_latest_selection`
+- `vscode_get_diagnostics`
+- `vscode_get_open_editors`
+- `vscode_get_workspace_folders`
+- `vscode_open_file`
+- `vscode_check_document_dirty`
+- `vscode_save_document`
+- `vscode_get_document_symbols`
+- `vscode_get_references`
+- `vscode_get_code_actions`
+- `vscode_execute_code_action`
+- `vscode_apply_workspace_edit`
+- `vscode_get_notifications`
+- `vscode_clear_notifications`
+
+These tools are backed by live VS Code APIs, so pi can inspect current selections, LSP diagnostics, symbols, references, quick-fix availability, dirty state, recent editor events, and can now apply VS Code-managed edits or execute specific quick fixes on demand.
 
 ## Configuration
 

@@ -5,7 +5,6 @@ export default defineConfig({
   external: ["vscode"],
   platform: "node",
   output: {
-    clean: true,
     file: "dist/extension.cjs",
     format: "cjs",
     sourcemap: true,
