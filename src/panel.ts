@@ -526,7 +526,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .shead b { font-weight: 600; flex: none; } .args { opacity: .6; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
   .ststate { opacity: .45; font-size: 11px; flex: none; }
   .thought { opacity: .55; font-style: italic; }
-  .tout { margin: 4px 0 2px; padding: 8px 10px; max-height: 300px; overflow: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; white-space: pre-wrap; background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.12)); border-radius: 6px; }
+  .tout { margin: 4px 0 2px; padding: 8px 10px; overflow-x: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; white-space: pre-wrap; background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.12)); border-radius: 6px; }
   .reason { opacity: .5; font-style: italic; font-size: 12.5px; margin: 4px 0; white-space: pre-wrap; }
   .errline { color: var(--vscode-errorForeground); font-size: 12px; margin: 4px 0; }
   .toolimg { max-width: 100%; border-radius: 6px; margin: 4px 0; }
