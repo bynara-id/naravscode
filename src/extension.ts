@@ -4,6 +4,7 @@ import { registerAuth } from "./auth.ts";
 import { createBridge } from "./bridge/server.ts";
 import { createChatHandler } from "./chat.ts";
 import { TERMINAL_TITLE } from "./constants.ts";
+import { createNarayaPanelProvider } from "./panel.ts";
 import { createPiEnvironment, createPiShellArgs, findPiBinary, upgradePiBinary } from "./pi.ts";
 import { createSessionTracker } from "./sessions.ts";
 import { buildOpenWithFileContext, createNewTerminal } from "./terminal.ts";
@@ -96,11 +97,11 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }),
     vscode.commands.registerCommand("naraya.upgrade", upgradePiBinary),
-    // Empty tree so the activity-bar view shows its welcome content (buttons).
-    vscode.window.registerTreeDataProvider("naraya.home", {
-      getChildren: () => [],
-      getTreeItem: (element: vscode.TreeItem) => element,
-    }),
+    // Naraya side panel: Chat / Sessions / Account webview.
+    vscode.window.registerWebviewViewProvider(
+      "naraya.home",
+      createNarayaPanelProvider(extensionUri, () => bridgeConfig, openTerminal),
+    ),
     vscode.window.registerTerminalProfileProvider("naraya.terminal-profile", {
       provideTerminalProfile() {
         const terminalId = randomUUID();
