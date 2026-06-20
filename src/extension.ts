@@ -4,7 +4,7 @@ import { registerAuth } from "./auth.ts";
 import { createBridge } from "./bridge/server.ts";
 import { createChatHandler } from "./chat.ts";
 import { TERMINAL_TITLE } from "./constants.ts";
-import { createNarayaPanelProvider } from "./panel.ts";
+import { createNarayaPanelProvider, openChatPanel } from "./panel.ts";
 import { createPiEnvironment, createPiShellArgs, findPiBinary, upgradePiBinary } from "./pi.ts";
 import { createSessionTracker } from "./sessions.ts";
 import { buildOpenWithFileContext, createNewTerminal } from "./terminal.ts";
@@ -97,10 +97,14 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }),
     vscode.commands.registerCommand("naraya.upgrade", upgradePiBinary),
-    // Naraya side panel: Chat / Sessions / Account webview.
+    // Naraya chat opens as an editor-area panel (Claude-style tab); the sidebar
+    // is the launcher (Sessions + Account + New chat).
+    vscode.commands.registerCommand("naraya.openChat", () =>
+      openChatPanel(extensionUri, () => bridgeConfig, { fresh: true }),
+    ),
     vscode.window.registerWebviewViewProvider(
       "naraya.home",
-      createNarayaPanelProvider(extensionUri, () => bridgeConfig, openTerminal),
+      createNarayaPanelProvider(extensionUri, (opts) => openChatPanel(extensionUri, () => bridgeConfig, opts)),
     ),
     vscode.window.registerTerminalProfileProvider("naraya.terminal-profile", {
       provideTerminalProfile() {

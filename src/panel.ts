@@ -6,12 +6,10 @@ import { StringDecoder } from "node:string_decoder";
 import * as vscode from "vscode";
 import { createPiEnvironment, createPiRpcArgs, ensurePiBinary, spawnNaraya } from "./pi.ts";
 
-// Naraya side panel — a Claude-style webview with three sections:
-//   Chat     (9c) — multi-turn in-panel chat streamed via the naraya RPC engine
-//   Sessions (9b) — past Naraya sessions (resume / new), with search
-//   Account  (9a) — live account/credit/quota/usage from the gateway /v1/me
-//
-// The engine is the `naraya` CLI; this panel only renders + drives it.
+// Naraya UI: a lightweight sidebar (Sessions + Account + New Chat) plus a full
+// chat that opens as an EDITOR-AREA webview panel — like Claude Code's tab,
+// not a cramped sidebar view. The engine is the `naraya` CLI (RPC); these views
+// only render + drive it.
 
 const ROUTER_BASE = "https://router.naraya.ai/v1";
 
@@ -77,7 +75,7 @@ function listSessions(limit = 200): SessionInfo[] {
         const { title, project } = describeSession(file);
         out.push({ file, title, project, mtime: st.mtimeMs });
       } catch {
-        /* skip unreadable */
+        /* skip */
       }
     }
   }
@@ -114,8 +112,6 @@ function describeSession(file: string): { title: string; project: string } {
   return { title: title || "(untitled session)", project: project || "" };
 }
 
-// Read a session JSONL into a flat transcript (user/assistant text only),
-// capped to the last N turns so the panel stays responsive.
 function readTranscript(file: string, limit = 100): Array<{ role: string; text: string }> {
   const out: Array<{ role: string; text: string }> = [];
   try {
@@ -139,80 +135,99 @@ function readTranscript(file: string, limit = 100): Array<{ role: string; text: 
   return out.slice(-limit);
 }
 
-export function createNarayaPanelProvider(
+function nonce(): string {
+  let s = "";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  for (let i = 0; i < 24; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+const ICONS = {
+  chat: `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M8 1.7A6.3 6.3 0 0 0 2.3 11L1.6 14l3-.7A6.3 6.3 0 1 0 8 1.7Z"/></svg>`,
+  sessions: `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M8 4v4l2.5 1.5"/><circle cx="8" cy="8" r="6"/></svg>`,
+  account: `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg>`,
+  plus: `<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M7.25 2h1.5v5.25H14v1.5H8.75V14h-1.5V8.75H2v-1.5h5.25z"/></svg>`,
+  sess: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6h12"/></svg>`,
+  send: `<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M1.7 2 14.5 8 1.7 14l1.8-6-1.8-6Zm2 2.6L4.4 8 3.7 11.4 11 8 3.7 4.6Z"/></svg>`,
+};
+
+// ============================ Editor-area chat panel ========================
+
+let chatPanel: vscode.WebviewPanel | undefined;
+let chatChild: ChildProcess | undefined;
+let chatOut: vscode.OutputChannel | undefined;
+
+export function openChatPanel(
   extensionUri: vscode.Uri,
   getBridgeConfig: () => { url: string; token: string } | undefined,
-  openTerminal: (extraArgs?: string[]) => Promise<vscode.Terminal | undefined>,
-): vscode.WebviewViewProvider {
-  const out = vscode.window.createOutputChannel("Naraya");
-  return {
-    resolveWebviewView(view) {
-      view.webview.options = { enableScripts: true, localResourceRoots: [extensionUri] };
-      view.webview.html = html(view.webview, extensionUri);
+  opts: { sessionFile?: string; fresh?: boolean } = {},
+): void {
+  if (!chatOut) chatOut = vscode.window.createOutputChannel("Naraya");
 
-      // One long-lived RPC child per panel so chat is MULTI-TURN: the in-memory
-      // session in that process remembers the conversation across messages.
-      let child: ChildProcess | undefined;
-      let wired = false;
+  if (chatPanel) {
+    chatPanel.reveal(vscode.ViewColumn.Active);
+  } else {
+    chatPanel = vscode.window.createWebviewPanel("naraya.chat", "Naraya", vscode.ViewColumn.Active, {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [extensionUri],
+    });
+    chatPanel.iconPath = vscode.Uri.joinPath(extensionUri, "assets", "logo.svg");
+    chatPanel.webview.html = chatHtml(chatPanel.webview, extensionUri);
 
-      const post = (msg: any) => void view.webview.postMessage(msg);
-      const send = (o: object) => child?.stdin?.write(`${JSON.stringify(o)}\n`);
+    const panel = chatPanel;
+    const post = (m: any) => void panel.webview.postMessage(m);
+    const send = (o: object) => chatChild?.stdin?.write(`${JSON.stringify(o)}\n`);
 
-      const ensureChild = async (): Promise<boolean> => {
-        if (child) return true;
-        const naraya = await ensurePiBinary();
-        if (!naraya) {
-          out.appendLine("[chat] naraya binary NOT found");
-          post({ type: "chatError", error: "Naraya CLI not found on PATH." });
-          return false;
-        }
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const rpcArgs = createPiRpcArgs(extensionUri);
-        out.appendLine(`[chat] spawn: ${naraya} ${rpcArgs.join(" ")}`);
-        out.appendLine(`[chat] cwd=${cwd ?? "(none)"} platform=${process.platform}`);
-        child = spawnNaraya(naraya, rpcArgs, {
-          cwd,
-          env: { ...process.env, ...createPiEnvironment(getBridgeConfig()) },
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        child.stderr?.on("data", (d) => out.appendLine(`[chat:stderr] ${d.toString().trimEnd()}`));
-        wired = false;
-        const decoder = new StringDecoder("utf8");
-        let buf = "";
-        child.stdout?.on("data", (chunk) => {
-          buf += decoder.write(chunk);
-          let nl: number;
-          while ((nl = buf.indexOf("\n")) !== -1) {
-            const line = buf.slice(0, nl).replace(/\r$/, "");
-            buf = buf.slice(nl + 1);
-            if (!line) continue;
-            let ev: any;
-            try {
-              ev = JSON.parse(line);
-            } catch {
-              continue;
-            }
-            handleEvent(ev);
+    const ensureChild = async (): Promise<boolean> => {
+      if (chatChild) return true;
+      const naraya = await ensurePiBinary();
+      if (!naraya) {
+        post({ type: "chatError", error: "Naraya CLI not found on PATH." });
+        return false;
+      }
+      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const args = createPiRpcArgs(extensionUri);
+      chatOut!.appendLine(`[chat] spawn ${naraya} ${args.join(" ")} (cwd=${cwd ?? "-"})`);
+      chatChild = spawnNaraya(naraya, args, {
+        cwd,
+        env: { ...process.env, ...createPiEnvironment(getBridgeConfig()) },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      chatChild.stderr?.on("data", (d) => chatOut!.appendLine(`[stderr] ${d.toString().trimEnd()}`));
+      const decoder = new StringDecoder("utf8");
+      let buf = "";
+      chatChild.stdout?.on("data", (chunk) => {
+        buf += decoder.write(chunk);
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, nl).replace(/\r$/, "");
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          let ev: any;
+          try {
+            ev = JSON.parse(line);
+          } catch {
+            continue;
           }
-        });
-        child.on("close", (code) => {
-          out.appendLine(`[chat] process closed (code ${code})`);
-          child = undefined;
-          post({ type: "chatDone" });
-        });
-        child.on("error", (e) => {
-          out.appendLine(`[chat] spawn error: ${String(e?.message ?? e)}`);
-          child = undefined;
-          post({ type: "chatError", error: String(e?.message ?? e) });
-        });
-        wired = true;
-        return true;
-      };
+          handle(ev);
+        }
+      });
+      chatChild.on("close", (code) => {
+        chatOut!.appendLine(`[chat] closed (${code})`);
+        chatChild = undefined;
+        post({ type: "chatDone" });
+      });
+      chatChild.on("error", (e) => {
+        chatOut!.appendLine(`[chat] error ${String(e?.message ?? e)}`);
+        chatChild = undefined;
+        post({ type: "chatError", error: String(e?.message ?? e) });
+      });
+      return true;
 
-      const handleEvent = (ev: any) => {
+      function handle(ev: any) {
         if (ev.type === "extension_ui_request") {
-          const id = ev.id;
-          const method = ev.method;
+          const id = ev.id, method = ev.method;
           if (!id) return;
           void (async () => {
             try {
@@ -220,9 +235,9 @@ export function createNarayaPanelProvider(
                 const pick = await vscode.window.showWarningMessage(String(ev.message ?? ev.title ?? "Allow?"), { modal: true }, "Allow");
                 send({ type: "extension_ui_response", id, confirmed: pick === "Allow" });
               } else if (method === "select") {
-                const opts = Array.isArray(ev.options) ? ev.options.map(String) : [];
-                const choice = await vscode.window.showQuickPick(opts, { title: String(ev.title ?? "Select") });
-                send(choice === undefined ? { type: "extension_ui_response", id, cancelled: true } : { type: "extension_ui_response", id, value: choice });
+                const o = Array.isArray(ev.options) ? ev.options.map(String) : [];
+                const c = await vscode.window.showQuickPick(o, { title: String(ev.title ?? "Select") });
+                send(c === undefined ? { type: "extension_ui_response", id, cancelled: true } : { type: "extension_ui_response", id, value: c });
               } else if (method === "input") {
                 const v = await vscode.window.showInputBox({ title: String(ev.title ?? "Input") });
                 send(v === undefined ? { type: "extension_ui_response", id, cancelled: true } : { type: "extension_ui_response", id, value: v });
@@ -238,276 +253,271 @@ export function createNarayaPanelProvider(
         if (ev.type === "message_update") {
           const a = ev.assistantMessageEvent;
           if (a?.type === "text_delta" && typeof a.delta === "string") post({ type: "chatDelta", delta: a.delta });
-          else if (a?.type === "tool_call" || (a?.partial && Array.isArray(a.partial.content) && a.partial.content.some((c: any) => c.type === "toolCall"))) {
-            const name = a?.toolName ?? a?.partial?.content?.find((c: any) => c.type === "toolCall")?.name;
-            if (name) post({ type: "chatTool", name });
-          }
           return;
         }
         if (ev.type === "message_end" && ev.message?.role === "assistant") {
-          for (const part of ev.message.content ?? []) {
-            if (part.type === "toolCall" && part.name) post({ type: "chatTool", name: part.name });
-          }
+          for (const part of ev.message.content ?? []) if (part.type === "toolCall" && part.name) post({ type: "chatTool", name: part.name });
           return;
         }
-        if (ev.type === "agent_end") {
-          post({ type: "chatDone" }); // keep the process alive for the next turn
-        }
-      };
+        if (ev.type === "agent_end") post({ type: "chatDone" });
+      }
+    };
 
+    panel.webview.onDidReceiveMessage(async (msg: any) => {
+      if (msg?.type === "chat" && typeof msg.text === "string" && msg.text.trim()) {
+        if (await ensureChild()) send({ id: `p${Date.now()}`, type: "prompt", message: msg.text.trim() });
+      } else if (msg?.type === "newChat") {
+        try {
+          chatChild?.kill();
+        } catch {
+          /* ignore */
+        }
+        chatChild = undefined;
+      } else if (msg?.type === "stop") {
+        try {
+          chatChild?.kill();
+        } catch {
+          /* ignore */
+        }
+        chatChild = undefined;
+      }
+    });
+
+    panel.onDidDispose(() => {
+      try {
+        chatChild?.kill();
+      } catch {
+        /* ignore */
+      }
+      chatChild = undefined;
+      chatPanel = undefined;
+    });
+  }
+
+  // Fresh chat or load a session transcript into the (possibly reused) panel.
+  if (opts.fresh) {
+    try {
+      chatChild?.kill();
+    } catch {
+      /* ignore */
+    }
+    chatChild = undefined;
+    void chatPanel.webview.postMessage({ type: "reset" });
+  } else if (opts.sessionFile) {
+    try {
+      chatChild?.kill();
+    } catch {
+      /* ignore */
+    }
+    chatChild = undefined;
+    void chatPanel.webview.postMessage({ type: "transcript", messages: readTranscript(opts.sessionFile) });
+  }
+}
+
+// ============================ Sidebar (Sessions + Account) ===================
+
+export function createNarayaPanelProvider(
+  extensionUri: vscode.Uri,
+  openChat: (opts?: { sessionFile?: string; fresh?: boolean }) => void,
+): vscode.WebviewViewProvider {
+  return {
+    resolveWebviewView(view) {
+      view.webview.options = { enableScripts: true, localResourceRoots: [extensionUri] };
+      view.webview.html = sidebarHtml(view.webview, extensionUri);
       view.webview.onDidReceiveMessage(async (msg: any) => {
         switch (msg?.type) {
           case "ready":
-          case "refreshAccount":
-            post({ type: "account", result: await fetchAccount() });
-            break;
           case "refreshSessions":
-            post({ type: "sessions", list: listSessions() });
+            view.webview.postMessage({ type: "sessions", list: listSessions() });
             break;
-          case "openInTerminal":
-            void openTerminal(typeof msg.file === "string" ? ["--resume", msg.file] : undefined);
+          case "refreshAccount":
+            view.webview.postMessage({ type: "account", result: await fetchAccount() });
             break;
-          case "loadSession":
-            if (typeof msg.file === "string") post({ type: "transcript", messages: readTranscript(msg.file) });
+          case "newChat":
+            openChat({ fresh: true });
+            break;
+          case "openSession":
+            if (typeof msg.file === "string") openChat({ sessionFile: msg.file });
             break;
           case "signIn":
             void vscode.commands.executeCommand("naraya.signIn");
             break;
-          case "chat":
-            if (typeof msg.text === "string" && msg.text.trim()) {
-              if (await ensureChild()) send({ id: `p${Date.now()}`, type: "prompt", message: msg.text.trim() });
-            }
-            break;
-          case "newChat":
-            try {
-              child?.kill();
-            } catch {
-              /* ignore */
-            }
-            child = undefined;
-            break;
-          case "stopChat":
-            try {
-              child?.kill();
-            } catch {
-              /* ignore */
-            }
-            child = undefined;
-            break;
         }
-        void wired;
-      });
-
-      view.onDidDispose(() => {
-        try {
-          child?.kill();
-        } catch {
-          /* ignore */
-        }
-        child = undefined;
       });
     },
   };
 }
 
-function nonce(): string {
-  let s = "";
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 24; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-
-function html(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const n = nonce();
   const logo = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "assets", "logo.svg"));
   const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${n}';`;
-  // Inline SVG icons (currentColor) — no codicon-font dependency (works on forks).
-  const ic = {
-    chat: `<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M8 1.5A6.5 6.5 0 0 0 2.2 11L1.5 14l3-0.7A6.5 6.5 0 1 0 8 1.5Z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`,
-    sessions: `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M8 4v4l2.5 1.5"/><circle cx="8" cy="8" r="6"/></svg>`,
-    account: `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg>`,
-    plus: `<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M7.25 2h1.5v5.25H14v1.5H8.75V14h-1.5V8.75H2v-1.5h5.25z"/></svg>`,
-    sess: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6h12"/></svg>`,
-  };
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="${csp}">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  return `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="${csp}">
 <style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); margin: 0; }
-  .brand { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px; }
-  .brand img { width: 22px; height: 22px; } .brand strong { font-size: 14px; }
-  .tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); position: sticky; top: 0; background: var(--vscode-sideBar-background); z-index: 2; }
-  .tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 4px; cursor: pointer; opacity: .6; border-bottom: 2px solid transparent; font-size: 12px; }
-  .tab:hover { opacity: .85; } .tab.active { opacity: 1; border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-focusBorder); }
-  .view { display: none; } .view.active { display: flex; flex-direction: column; }
-  h3 { margin: 4px 0 6px; font-size: 11px; text-transform: uppercase; opacity: .65; letter-spacing: .05em; }
-  .row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--vscode-panel-border); }
-  .row:last-child { border: 0; } .row .k { opacity: .7; } .row .v { font-weight: 600; text-align: right; }
-  button { display: inline-flex; align-items: center; gap: 6px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; }
-  button:hover { background: var(--vscode-button-hoverBackground); }
-  button.sec { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
-  input { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 7px 9px; border-radius: 5px; outline: none; }
-  input:focus { border-color: var(--vscode-focusBorder); }
-  .muted { opacity: .6; padding: 6px 0; }
-  /* chat */
-  #v-chat { height: calc(100vh - 96px); }
-  #log { flex: 1; overflow-y: auto; padding: 12px; }
-  .welcome { text-align: center; padding: 28px 16px; opacity: .85; }
-  .welcome img { width: 40px; height: 40px; margin-bottom: 10px; }
-  .welcome p { opacity: .65; font-size: 12px; margin: 6px 0 16px; }
-  .chip { display: inline-block; margin: 4px; padding: 6px 10px; border: 1px solid var(--vscode-panel-border); border-radius: 14px; cursor: pointer; font-size: 12px; }
+  :root { color-scheme: light dark; } * { box-sizing: border-box; }
+  html,body { height: 100%; margin: 0; }
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); display: flex; flex-direction: column; }
+  .top { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
+  .top img { width: 20px; height: 20px; } .top strong { flex: 1; }
+  .top button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+  #log { flex: 1; overflow-y: auto; padding: 20px; max-width: 820px; width: 100%; margin: 0 auto; }
+  .welcome { text-align: center; padding: 48px 16px; }
+  .welcome img { width: 48px; height: 48px; margin-bottom: 12px; }
+  .welcome h2 { margin: 4px 0; } .welcome p { opacity: .65; margin: 6px 0 18px; }
+  .chip { display: inline-block; margin: 5px; padding: 8px 14px; border: 1px solid var(--vscode-panel-border); border-radius: 16px; cursor: pointer; }
   .chip:hover { background: var(--vscode-list-hoverBackground); }
-  .msg { padding: 8px 0; } .msg .who { display: flex; align-items: center; gap: 6px; font-size: 11px; opacity: .6; margin-bottom: 3px; }
-  .msg .body { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
-  .avatar { width: 16px; height: 16px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
+  .msg { padding: 12px 0; display: flex; gap: 10px; }
+  .msg .avatar { width: 24px; height: 24px; border-radius: 6px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; }
   .av-u { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-  .tool { font-size: 11px; opacity: .6; font-style: italic; padding: 2px 0; }
-  .chatbar { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--vscode-panel-border); }
-  .pad { padding: 12px; }
-  .sess { display: flex; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; align-items: flex-start; }
-  .sess:hover { background: var(--vscode-list-hoverBackground); border-color: var(--vscode-panel-border); }
-  .sess .ic { opacity: .5; margin-top: 1px; }
-  .sess .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sess .m { font-size: 11px; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .toolbar { display: flex; gap: 6px; padding: 10px 12px 6px; }
-</style>
-</head>
-<body>
-  <div class="brand"><img src="${logo}" alt=""><strong>Naraya AI</strong></div>
-  <div class="tabs">
-    <div class="tab active" data-v="chat">${ic.chat} Chat</div>
-    <div class="tab" data-v="sessions">${ic.sessions} Sessions</div>
-    <div class="tab" data-v="account">${ic.account} Account</div>
-  </div>
-
-  <div class="view active" id="v-chat">
-    <div id="log"></div>
-    <div class="chatbar">
-      <input id="chatInput" placeholder="Message Naraya… (Enter to send)">
-      <button id="send">${ic.chat}</button>
-    </div>
-  </div>
-
-  <div class="view" id="v-sessions">
-    <div class="toolbar"><button id="newSession">${ic.plus} New session</button></div>
-    <div class="pad" style="padding-top:0"><input id="search" placeholder="Search sessions…"></div>
-    <div class="pad" id="sessions" style="padding-top:0"><div class="muted">Loading…</div></div>
-  </div>
-
-  <div class="view" id="v-account">
-    <div class="pad" id="account"><div class="muted">Loading…</div></div>
-    <div class="pad" style="padding-top:0"><button class="sec" id="refreshAcc">Refresh</button></div>
-  </div>
-
+  .msg .col { min-width: 0; flex: 1; } .msg .who { font-size: 12px; opacity: .6; margin-bottom: 3px; }
+  .msg .body { white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+  .tool { font-size: 12px; opacity: .6; font-style: italic; padding: 2px 0; }
+  .barwrap { border-top: 1px solid var(--vscode-panel-border); padding: 12px; }
+  .bar { display: flex; gap: 8px; max-width: 820px; margin: 0 auto; }
+  textarea { flex: 1; resize: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: inherit; outline: none; max-height: 160px; }
+  textarea:focus { border-color: var(--vscode-focusBorder); }
+  .bar button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 8px; padding: 0 14px; cursor: pointer; }
+</style></head><body>
+  <div class="top"><img src="${logo}"><strong>Naraya AI</strong><button id="new">+ New chat</button></div>
+  <div id="log"></div>
+  <div class="barwrap"><div class="bar"><textarea id="in" rows="1" placeholder="Message Naraya…  (Enter to send, Shift+Enter for newline)"></textarea><button id="send">${ICONS.send}</button></div></div>
 <script nonce="${n}">
   const vscode = acquireVsCodeApi();
-  const IC = ${JSON.stringify(ic)};
-  let sessions = [];
-
-  function switchTab(v) {
-    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.v === v));
-    document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === 'v-' + v));
-    if (v === 'sessions') vscode.postMessage({ type: 'refreshSessions' });
-    if (v === 'account') vscode.postMessage({ type: 'refreshAccount' });
-  }
-  document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.v));
-
-  // ---- Chat ----
-  const log = document.getElementById('log');
-  const input = document.getElementById('chatInput');
-  let streaming = false, assistantBody = null, empty = true;
   const LOGO = ${JSON.stringify(String(logo))};
-  function resetChat() { empty = true; assistantBody = null; streaming = false; showWelcome(); }
-
-  function showWelcome() {
-    log.innerHTML = '<div class="welcome"><img src="'+LOGO+'"><div><strong>Chat with Naraya</strong></div>'
-      + '<p>Runs the Naraya engine in this workspace — ask it to build, fix, or explain. It can read & edit your files (with permission).</p>'
-      + '<div><span class="chip">Explain this file</span><span class="chip">Find bugs in the project</span><span class="chip">Write tests</span></div></div>';
+  const log = document.getElementById('log'), input = document.getElementById('in');
+  let streaming = false, body = null, empty = true;
+  function welcome() {
+    log.innerHTML = '<div class="welcome"><img src="'+LOGO+'"><h2>Naraya AI</h2>'
+      + '<p>Runs the Naraya engine in this workspace — build, fix, explain. Reads & edits files with your permission.</p>'
+      + '<div><span class="chip">Explain this file</span><span class="chip">Find bugs</span><span class="chip">Write tests</span></div></div>';
     log.querySelectorAll('.chip').forEach(c => c.onclick = () => { input.value = c.textContent; input.focus(); });
   }
-  function addMsg(who, cls, av) {
+  function add(who, cls, av) {
     if (empty) { log.innerHTML = ''; empty = false; }
     const d = document.createElement('div'); d.className = 'msg ' + cls;
-    d.innerHTML = '<div class="who">'+av+' '+who+'</div><div class="body"></div>';
+    d.innerHTML = av + '<div class="col"><div class="who">'+who+'</div><div class="body"></div></div>';
     log.appendChild(d); log.scrollTop = log.scrollHeight; return d.querySelector('.body');
   }
   function send() {
-    const text = input.value.trim(); if (!text || streaming) return;
-    addMsg('You', 'user', '<span class="avatar av-u">U</span>').textContent = text;
-    input.value = ''; streaming = true;
-    assistantBody = addMsg('Naraya', 'assistant', '<img class="avatar" src="'+LOGO+'">');
-    vscode.postMessage({ type: 'chat', text });
+    const t = input.value.trim(); if (!t || streaming) return;
+    add('You', 'user', '<span class="avatar av-u">U</span>').textContent = t;
+    input.value = ''; input.style.height = 'auto'; streaming = true;
+    body = add('Naraya', 'assistant', '<img class="avatar" src="'+LOGO+'">');
+    vscode.postMessage({ type: 'chat', text: t });
   }
   document.getElementById('send').onclick = send;
+  document.getElementById('new').onclick = () => { vscode.postMessage({ type: 'newChat' }); empty = true; body = null; streaming = false; welcome(); };
+  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(160, input.scrollHeight) + 'px'; });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  window.addEventListener('message', e => {
+    const m = e.data;
+    if (m.type === 'chatDelta') { if (body) { body.textContent += m.delta; log.scrollTop = log.scrollHeight; } }
+    else if (m.type === 'chatTool') { const t = document.createElement('div'); t.className='tool'; t.textContent='⚙ '+m.name; if (body) body.parentElement.appendChild(t); log.scrollTop = log.scrollHeight; }
+    else if (m.type === 'chatDone') streaming = false;
+    else if (m.type === 'chatError') { if (body) body.textContent += '\\n[error: '+m.error+']'; streaming = false; }
+    else if (m.type === 'reset') { empty = true; body = null; streaming = false; welcome(); }
+    else if (m.type === 'transcript') {
+      empty = true; body = null; log.innerHTML = '';
+      for (const x of (m.messages||[])) {
+        const av = x.role === 'user' ? '<span class="avatar av-u">U</span>' : '<img class="avatar" src="'+LOGO+'">';
+        add(x.role === 'user' ? 'You' : 'Naraya', x.role, av).textContent = x.text;
+      }
+      if (!(m.messages||[]).length) welcome();
+    }
+  });
+  welcome();
+</script></body></html>`;
+}
 
-  // ---- Sessions ----
+function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  const n = nonce();
+  const logo = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "assets", "logo.svg"));
+  const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${n}';`;
+  return `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="${csp}">
+<style>
+  :root { color-scheme: light dark; } * { box-sizing: border-box; }
+  body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); margin: 0; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 12px 12px 6px; } .brand img { width: 22px; height: 22px; }
+  .newbtn { margin: 6px 12px 8px; }
+  button { display: inline-flex; align-items: center; gap: 6px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; width: 100%; justify-content: center; }
+  button:hover { background: var(--vscode-button-hoverBackground); } button.sec { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); width: auto; }
+  .tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+  .tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 4px; cursor: pointer; opacity: .6; border-bottom: 2px solid transparent; font-size: 12px; }
+  .tab.active { opacity: 1; border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-focusBorder); }
+  .view { display: none; padding: 10px 12px; } .view.active { display: block; }
+  input { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 7px 9px; border-radius: 5px; outline: none; margin-bottom: 8px; }
+  .muted { opacity: .6; padding: 6px 0; }
+  .sess { display: flex; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+  .sess:hover { background: var(--vscode-list-hoverBackground); border-color: var(--vscode-panel-border); }
+  .sess .ic { opacity: .5; margin-top: 1px; } .sess .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .sess .m { font-size: 11px; opacity: .55; }
+  h3 { margin: 4px 0 6px; font-size: 11px; text-transform: uppercase; opacity: .65; }
+  .row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--vscode-panel-border); } .row:last-child { border: 0; } .row .k { opacity: .7; } .row .v { font-weight: 600; text-align: right; }
+</style></head><body>
+  <div class="brand"><img src="${logo}"><strong>Naraya AI</strong></div>
+  <div class="newbtn"><button id="new">${ICONS.plus} New chat</button></div>
+  <div class="tabs">
+    <div class="tab active" data-v="sessions">${ICONS.sessions} Sessions</div>
+    <div class="tab" data-v="account">${ICONS.account} Account</div>
+  </div>
+  <div class="view active" id="v-sessions">
+    <input id="search" placeholder="Search sessions…">
+    <div id="sessions"><div class="muted">Loading…</div></div>
+  </div>
+  <div class="view" id="v-account">
+    <div id="account"><div class="muted">Loading…</div></div>
+    <button class="sec" id="refreshAcc" style="margin-top:8px">Refresh</button>
+  </div>
+<script nonce="${n}">
+  const vscode = acquireVsCodeApi();
+  const IC = ${JSON.stringify(ICONS)};
+  let sessions = [];
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x===t));
+    document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id==='v-'+t.dataset.v));
+    if (t.dataset.v === 'sessions') vscode.postMessage({ type: 'refreshSessions' });
+    if (t.dataset.v === 'account') vscode.postMessage({ type: 'refreshAccount' });
+  });
+  document.getElementById('new').onclick = () => vscode.postMessage({ type: 'newChat' });
   function renderSessions() {
-    const q = (document.getElementById('search').value || '').toLowerCase();
+    const q = (document.getElementById('search').value||'').toLowerCase();
     const box = document.getElementById('sessions'); box.innerHTML = '';
-    const items = sessions.filter(s => !q || (s.title + ' ' + s.project).toLowerCase().includes(q));
-    if (!items.length) { box.innerHTML = '<div class="muted">No sessions yet.</div>'; return; }
+    const items = sessions.filter(s => !q || (s.title+' '+s.project).toLowerCase().includes(q));
+    if (!items.length) { box.innerHTML = '<div class="muted">No sessions.</div>'; return; }
     for (const s of items) {
-      const d = document.createElement('div'); d.className = 'sess';
+      const d = document.createElement('div'); d.className='sess';
       const proj = s.project ? s.project.split(/[\\\\/]/).pop() : '';
       d.innerHTML = '<span class="ic">'+IC.sess+'</span><div style="min-width:0"><div class="t"></div><div class="m"></div></div>';
       d.querySelector('.t').textContent = s.title;
       d.querySelector('.m').textContent = proj + ' · ' + new Date(s.mtime).toLocaleString();
-      d.onclick = () => { vscode.postMessage({ type: 'loadSession', file: s.file }); switchTab('chat'); };
+      d.onclick = () => vscode.postMessage({ type: 'openSession', file: s.file });
       box.appendChild(d);
     }
   }
   document.getElementById('search').addEventListener('input', renderSessions);
-  document.getElementById('newSession').onclick = () => { vscode.postMessage({ type: 'newChat' }); resetChat(); switchTab('chat'); };
-
-  // ---- Account ----
   function num(n){ return (n||0).toLocaleString(); }
   function renderAccount(r) {
     const box = document.getElementById('account');
     if (!r || !r.ok) {
-      if (r && r.error === 'not-signed-in') { box.innerHTML = '<div class="muted">Not signed in.</div>'; const b = document.createElement('button'); b.innerHTML = IC.account + ' Sign in with Naraya'; b.onclick = () => vscode.postMessage({ type: 'signIn' }); box.appendChild(b); return; }
-      box.innerHTML = '<div class="muted">Usage unavailable' + (r && r.error ? ' (' + r.error + ')' : '') + '.</div>'; return;
+      if (r && r.error === 'not-signed-in') { box.innerHTML='<div class="muted">Not signed in.</div>'; const b=document.createElement('button'); b.textContent='Sign in with Naraya'; b.onclick=()=>vscode.postMessage({type:'signIn'}); box.appendChild(b); return; }
+      box.innerHTML = '<div class="muted">Usage unavailable'+(r&&r.error?' ('+r.error+')':'')+'.</div>'; return;
     }
-    const s = r.data || {}; const a = s.account || {}, c = s.credit || {}, q = s.quota || {}, u = s.usage || {};
-    const rows = [
-      ['Email', a.email || '—'], ['Plan', a.plan || '—'],
-      ['Credit', 'Rp ' + Math.round(c.available||0).toLocaleString() + (c.usd_equivalent ? ' / $' + c.usd_equivalent : '')],
-      ['Quota', q.limit > 0 ? num(q.remaining) + ' / ' + num(q.limit) + ' ' + (q.unit || 'tokens') : 'fair-use'],
-      ['Tokens today', num(u.tokens_today)], ['Tokens month', num(u.tokens_month)],
-      ['Requests today', num(u.requests_today)], ['Success rate', typeof u.success_rate === 'number' ? Math.round(u.success_rate*100)+'%' : '—'],
-      ['Models', Array.isArray(s.models) ? s.models.length : 0],
-    ];
-    box.innerHTML = '<h3>Account</h3>' + rows.map(([k,v]) => '<div class="row"><span class="k">'+k+'</span><span class="v">'+String(v).replace(/</g,'&lt;')+'</span></div>').join('');
+    const s=r.data||{}, a=s.account||{}, c=s.credit||{}, q=s.quota||{}, u=s.usage||{};
+    const rows = [['Email',a.email||'—'],['Plan',a.plan||'—'],
+      ['Credit','Rp '+Math.round(c.available||0).toLocaleString()+(c.usd_equivalent?' / $'+c.usd_equivalent:'')],
+      ['Quota', q.limit>0 ? num(q.remaining)+' / '+num(q.limit)+' '+(q.unit||'tokens') : 'fair-use'],
+      ['Tokens today',num(u.tokens_today)],['Tokens month',num(u.tokens_month)],
+      ['Requests today',num(u.requests_today)],['Success rate', typeof u.success_rate==='number'?Math.round(u.success_rate*100)+'%':'—'],
+      ['Models', Array.isArray(s.models)?s.models.length:0]];
+    box.innerHTML = '<h3>Account</h3>'+rows.map(([k,v])=>'<div class="row"><span class="k">'+k+'</span><span class="v">'+String(v).replace(/</g,'&lt;')+'</span></div>').join('');
   }
   document.getElementById('refreshAcc').onclick = () => vscode.postMessage({ type: 'refreshAccount' });
-
   window.addEventListener('message', e => {
     const m = e.data;
-    if (m.type === 'account') renderAccount(m.result);
-    else if (m.type === 'transcript') {
-      empty = true; assistantBody = null; log.innerHTML = '';
-      for (const msg of (m.messages || [])) {
-        const who = msg.role === 'user' ? 'You' : 'Naraya';
-        const av = msg.role === 'user' ? '<span class="avatar av-u">U</span>' : '<img class="avatar" src="'+LOGO+'">';
-        addMsg(who, msg.role === 'user' ? 'user' : 'assistant', av).textContent = msg.text;
-      }
-      if (!(m.messages || []).length) resetChat();
-    }
-    else if (m.type === 'sessions') { sessions = m.list || []; renderSessions(); }
-    else if (m.type === 'chatDelta') { if (assistantBody) { assistantBody.textContent += m.delta; log.scrollTop = log.scrollHeight; } }
-    else if (m.type === 'chatTool') { const t = document.createElement('div'); t.className='tool'; t.textContent = '⚙ ' + m.name; if (assistantBody) assistantBody.parentElement.insertBefore(t, assistantBody); log.scrollTop = log.scrollHeight; }
-    else if (m.type === 'chatDone') { streaming = false; }
-    else if (m.type === 'chatError') { if (assistantBody) assistantBody.textContent += '\\n[error: ' + m.error + ']'; streaming = false; }
+    if (m.type === 'sessions') { sessions = m.list||[]; renderSessions(); }
+    else if (m.type === 'account') renderAccount(m.result);
   });
-
-  showWelcome();
   vscode.postMessage({ type: 'ready' });
-</script>
-</body>
-</html>`;
+</script></body></html>`;
 }
