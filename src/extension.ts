@@ -5,7 +5,6 @@ import { createBridge } from "./bridge/server.ts";
 import { createChatHandler } from "./chat.ts";
 import { TERMINAL_TITLE } from "./constants.ts";
 import { createPiEnvironment, createPiShellArgs, findPiBinary, upgradePiBinary } from "./pi.ts";
-import { createPackagesViewProvider } from "./packages.ts";
 import { createSessionTracker } from "./sessions.ts";
 import { buildOpenWithFileContext, createNewTerminal } from "./terminal.ts";
 
@@ -97,10 +96,6 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }),
     vscode.commands.registerCommand("naraya.upgrade", upgradePiBinary),
-    vscode.window.registerWebviewViewProvider(
-      "naraya.packages",
-      createPackagesViewProvider(findPiBinary),
-    ),
     vscode.window.registerTerminalProfileProvider("naraya.terminal-profile", {
       provideTerminalProfile() {
         const terminalId = randomUUID();
