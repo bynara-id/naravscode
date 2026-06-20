@@ -1,8 +1,8 @@
 {
-  "name": "pi-vscode",
-  "displayName": "Pi Coding Agent",
+  "name": "naraya-vscode",
+  "displayName": "Naraya AI",
   "version": "0.0.9",
-  "description": "VS Code extension for pi coding agent",
+  "description": "VS Code extension for the Naraya AI coding agent",
   "categories": [
     "AI",
     "Chat"
@@ -10,9 +10,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pi0/pi-vscode"
+    "url": "https://github.com/naraya-ai/naraya-vscode"
   },
-  "publisher": "pi0",
+  "publisher": "naraya",
   "type": "module",
   "main": "./dist/extension.cjs",
   "scripts": {
@@ -39,8 +39,8 @@
   },
   "contributes": {
     "icons": {
-      "pi-logo": {
-        "description": "Pi logo icon",
+      "naraya-logo": {
+        "description": "Naraya logo icon",
         "default": {
           "fontPath": "assets/fonts/pi-icons.woff2",
           "fontCharacter": "\\F101"
@@ -49,57 +49,61 @@
     },
     "chatParticipants": [
       {
-        "id": "pi-vscode.chat",
-        "fullName": "Pi Coding Agent",
-        "name": "pi",
-        "description": "Chat with Pi coding agent",
+        "id": "naraya.chat",
+        "fullName": "Naraya AI",
+        "name": "naraya",
+        "description": "Chat with the Naraya AI coding agent",
         "isSticky": true
       }
     ],
     "commands": [
       {
-        "command": "pi-vscode.open",
-        "title": "Pi: Open",
+        "command": "naraya.open",
+        "title": "Naraya: Open",
         "icon": {
           "light": "assets/logo-light.svg",
           "dark": "assets/logo.svg"
         }
       },
       {
-        "command": "pi-vscode.openWithFile",
-        "title": "Pi: Open with File",
+        "command": "naraya.openWithFile",
+        "title": "Naraya: Open with File",
         "icon": {
           "light": "assets/logo-light.svg",
           "dark": "assets/logo.svg"
         }
       },
       {
-        "command": "pi-vscode.sendSelection",
-        "title": "Pi: Send Selection"
+        "command": "naraya.sendSelection",
+        "title": "Naraya: Send Selection"
       },
       {
-        "command": "pi-vscode.upgrade",
-        "title": "Pi: Upgrade Pi and Packages"
+        "command": "naraya.upgrade",
+        "title": "Naraya: Upgrade Naraya CLI and Packages"
       },
       {
-        "command": "pi-vscode.openInNewWindow",
-        "title": "Pi: Open in New Window",
+        "command": "naraya.openInNewWindow",
+        "title": "Naraya: Open in New Window",
         "icon": {
           "light": "assets/logo-light.svg",
           "dark": "assets/logo.svg"
         }
+      },
+      {
+        "command": "naraya.signIn",
+        "title": "Naraya: Sign in with Naraya"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "pi-vscode.openWithFile",
+          "command": "naraya.openWithFile",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
-          "command": "pi-vscode.openWithFile",
+          "command": "naraya.openWithFile",
           "group": "navigation"
         }
       ]
@@ -107,49 +111,50 @@
     "terminal": {
       "profiles": [
         {
-          "id": "pi-vscode.terminal-profile",
-          "title": "Pi",
-          "icon": "pi-logo"
+          "id": "naraya.terminal-profile",
+          "title": "Naraya",
+          "icon": "naraya-logo"
         }
       ]
     },
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "pi",
-          "title": "Pi",
+          "id": "naraya",
+          "title": "Naraya",
           "icon": "assets/logo.svg"
         }
       ]
     },
     "views": {
-      "pi": [
+      "naraya": [
         {
           "type": "webview",
-          "id": "pi-vscode.packages",
+          "id": "naraya.packages",
           "name": "Packages"
         }
       ]
     },
     "configuration": {
-      "title": "Pi",
+      "title": "Naraya",
       "properties": {
-        "pi-vscode.path": {
+        "naraya.path": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the pi binary. Leave empty for auto-detection."
+          "description": "Absolute path to the naraya binary. Leave empty for auto-detection."
         }
       }
     },
     "keybindings": [
       {
-        "command": "pi-vscode.open",
+        "command": "naraya.open",
         "key": "ctrl+alt+3"
       }
     ]
   },
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onUri"
   ],
   "icon": "assets/icon.png",
   "engines": {

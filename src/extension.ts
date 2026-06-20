@@ -47,7 +47,7 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   const participant = vscode.chat.createChatParticipant(
-    "pi-vscode.chat",
+    "naraya.chat",
     createChatHandler({
       extensionUri,
       getBridgeConfig: () => bridgeConfig,
@@ -60,24 +60,24 @@ export async function activate(context: vscode.ExtensionContext) {
   participant.iconPath = logoIcon;
 
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.text = "$(pi-logo) Pi";
-  statusBarItem.tooltip = "Open Pi Terminal";
-  statusBarItem.command = "pi-vscode.open";
+  statusBarItem.text = "$(naraya-logo) Naraya";
+  statusBarItem.tooltip = "Open Naraya Terminal";
+  statusBarItem.command = "naraya.open";
   statusBarItem.show();
 
   context.subscriptions.push(
     participant,
     statusBarItem,
     vscode.window.onDidCloseTerminal((terminal) => sessions.onClose(terminal)),
-    vscode.commands.registerCommand("pi-vscode.open", async () => {
+    vscode.commands.registerCommand("naraya.open", async () => {
       const terminal = await openTerminal();
       terminal?.show();
     }),
-    vscode.commands.registerCommand("pi-vscode.openWithFile", async () => {
+    vscode.commands.registerCommand("naraya.openWithFile", async () => {
       const terminal = await openTerminal(undefined, buildOpenWithFileContext());
       terminal?.show();
     }),
-    vscode.commands.registerCommand("pi-vscode.sendSelection", async () => {
+    vscode.commands.registerCommand("naraya.sendSelection", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
       const selection = editor.document.getText(editor.selection);
@@ -85,18 +85,18 @@ export async function activate(context: vscode.ExtensionContext) {
       const terminal = await openTerminal([selection]);
       terminal?.show();
     }),
-    vscode.commands.registerCommand("pi-vscode.openInNewWindow", async () => {
+    vscode.commands.registerCommand("naraya.openInNewWindow", async () => {
       const terminal = await openTerminal();
       if (!terminal) return;
       terminal.show();
       await vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }),
-    vscode.commands.registerCommand("pi-vscode.upgrade", upgradePiBinary),
+    vscode.commands.registerCommand("naraya.upgrade", upgradePiBinary),
     vscode.window.registerWebviewViewProvider(
-      "pi-vscode.packages",
+      "naraya.packages",
       createPackagesViewProvider(findPiBinary),
     ),
-    vscode.window.registerTerminalProfileProvider("pi-vscode.terminal-profile", {
+    vscode.window.registerTerminalProfileProvider("naraya.terminal-profile", {
       provideTerminalProfile() {
         const terminalId = randomUUID();
         const baseEnv = createPiEnvironment(bridgeConfig);

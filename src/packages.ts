@@ -44,7 +44,7 @@ export function createPackagesViewProvider(findPiBinary: () => string): vscode.W
         } else if (msg.type === "refresh") {
           refreshInstalled();
         } else if (msg.type === "upgrade") {
-          void vscode.commands.executeCommand("pi-vscode.upgrade");
+          void vscode.commands.executeCommand("naraya.upgrade");
         }
       });
     },
@@ -105,7 +105,7 @@ body { height:100%; margin:0; padding:0; font-family: var(--vscode-font-family);
   <button id="search-btn">Search</button>
 </div>
 <div class="action-bar">
-  <button id="upgrade-btn" title="Upgrade the pi CLI, then run pi update for installed packages">Upgrade Pi and Packages</button>
+  <button id="upgrade-btn" title="Upgrade the Naraya CLI, then run naraya update for installed packages">Upgrade Naraya and Packages</button>
 </div>
 <div id="installed-section" style="display:none;padding:8px;border-bottom:1px solid var(--vscode-widget-border,var(--vscode-panel-border,transparent))">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">

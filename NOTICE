@@ -1,0 +1,8 @@
+Naraya AI for VS Code (naraya-vscode)
+Copyright (c) PT Naraya Teknologi Indonesia
+
+This product is based on pi-vscode (https://github.com/pithings/pi-vscode),
+licensed under the MIT License. The original MIT LICENSE is retained in this
+repository. Modifications by PT Naraya Teknologi Indonesia rebrand the extension
+as "Naraya AI" and drive the `naraya` CLI (https://www.npmjs.com/package/@naraya/cli)
+as its engine.

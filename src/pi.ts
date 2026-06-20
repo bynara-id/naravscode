@@ -14,7 +14,7 @@ import {
 let piExistsCache: boolean | undefined;
 
 export function findPiBinary(): string {
-  const config = vscode.workspace.getConfiguration("pi-vscode");
+  const config = vscode.workspace.getConfiguration("naraya");
   return resolvePiBinary({
     customPath: config.get<string>("path") || undefined,
     workspaceDirs: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
@@ -37,12 +37,12 @@ export async function ensurePiBinary(): Promise<string | undefined> {
 
   const managers = PI_PACKAGE_MANAGERS.filter((manager) => manager !== "yarn");
   const action = await vscode.window.showErrorMessage(
-    "Pi binary not found. Install it globally?",
+    "Naraya CLI not found. Install it globally?",
     ...managers,
   );
   if (action) {
     piExistsCache = undefined;
-    const terminal = vscode.window.createTerminal({ name: "Install Pi" });
+    const terminal = vscode.window.createTerminal({ name: "Install Naraya CLI" });
     terminal.show();
     terminal.sendText(createPiGlobalInstallCommand(action));
   }
@@ -61,15 +61,15 @@ export async function upgradePiBinary(): Promise<void> {
   }
   if (!manager) {
     manager = (await vscode.window.showQuickPick([...PI_PACKAGE_MANAGERS], {
-      placeHolder: `Could not infer the package manager for ${piPath}. Choose one to upgrade Pi globally.`,
+      placeHolder: `Could not infer the package manager for ${piPath}. Choose one to upgrade Naraya globally.`,
     })) as PiPackageManager | undefined;
   }
   if (!manager) return;
 
-  const terminal = vscode.window.createTerminal({ name: "Upgrade Pi" });
+  const terminal = vscode.window.createTerminal({ name: "Upgrade Naraya CLI" });
   terminal.show();
   terminal.sendText(createPiUpgradeCommand(manager, piPath));
-  void vscode.window.showInformationMessage(`Upgrading Pi with ${manager}. Found pi at: ${piPath}`);
+  void vscode.window.showInformationMessage(`Upgrading Naraya with ${manager}. Found naraya at: ${piPath}`);
 }
 
 export function createPiShellArgs(

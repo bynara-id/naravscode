@@ -1,4 +1,4 @@
-export const PI_PACKAGE_NAME = "@mariozechner/pi-coding-agent";
+export const PI_PACKAGE_NAME = "@naraya/cli";
 
 export type PiPackageManager = "bun" | "npm" | "pnpm" | "yarn";
 
