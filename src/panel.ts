@@ -166,6 +166,24 @@ function nonce(): string {
   return s;
 }
 
+// Find an image file path a tool wrote (e.g. render_mermaid's PNG) in its output.
+function findImagePath(text: string): string {
+  const m = text.match(/([A-Za-z]:[\\/][^\n\r"']*?\.(?:png|jpe?g|gif|svg)|\/[^\n\r"']*?\.(?:png|jpe?g|gif|svg))/i);
+  return m?.[1]?.trim() ?? "";
+}
+// Read a (small) image into a data URI so the webview can show it inline.
+function readImageDataUri(p: string): string {
+  try {
+    const st = statSync(p);
+    if (!st.isFile() || st.size > 6_000_000) return "";
+    const ext = (p.split(".").pop() || "").toLowerCase();
+    const mime = ext === "svg" ? "image/svg+xml" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "gif" ? "image/gif" : "image/png";
+    return `data:${mime};base64,${readFileSync(p).toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
+
 // --- Editor (extension) chat sessions, kept SEPARATE from the CLI's sessions
 // so the panel's history doesn't mix with terminal sessions (Claude-style). ---
 function editorSessionsDir(): string {
@@ -349,7 +367,13 @@ export function openChatPanel(
           return;
         }
         if (ev.type === "tool_execution_end") {
-          post({ type: "toolEnd", id: ev.toolCallId, result: extractText(ev.result), isError: !!ev.isError });
+          const text = extractText(ev.result);
+          post({ type: "toolEnd", id: ev.toolCallId, result: text, isError: !!ev.isError });
+          const imgPath = findImagePath(text);
+          if (imgPath) {
+            const data = readImageDataUri(imgPath);
+            if (data) post({ type: "toolImage", id: ev.toolCallId, src: data });
+          }
           return;
         }
         if (ev.type === "agent_end") {
@@ -494,7 +518,11 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .av-u { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
   .msg .col { min-width: 0; flex: 1; } .msg .who { font-size: 12px; opacity: .6; margin-bottom: 3px; }
   .msg .body { word-break: break-word; line-height: 1.6; }
-  .msg.user .body { white-space: pre-wrap; }
+  .msg.user .body, .body.usertext { white-space: pre-wrap; }
+  .body table { border-collapse: collapse; margin: 6px 0; font-size: .95em; }
+  .body th, .body td { border: 1px solid var(--vscode-panel-border); padding: 3px 9px; text-align: left; }
+  .body th { background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08)); }
+  .toolimg { max-width: 100%; border-radius: 6px; margin: 6px 0; border: 1px solid var(--vscode-panel-border); }
   .body p { margin: 4px 0; } .body h2,.body h3 { margin: 10px 0 3px; font-size: 1.03em; }
   .body ul,.body ol { margin: 3px 0; padding-left: 20px; } .body li { margin: 1px 0; }
   .body a { color: var(--vscode-textLink-foreground); }
