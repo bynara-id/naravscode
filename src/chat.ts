@@ -1,8 +1,7 @@
-import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import * as vscode from "vscode";
 import { toErrorMessage } from "./bridge/utils.ts";
-import { createPiEnvironment, createPiRpcArgs, ensurePiBinary } from "./pi.ts";
+import { createPiEnvironment, createPiRpcArgs, ensurePiBinary, spawnNaraya } from "./pi.ts";
 import { createNewTerminal } from "./terminal.ts";
 
 export function createChatHandler(options: {
@@ -57,7 +56,7 @@ async function runPiRpcPrompt(options: {
   bridgeConfig?: { url: string; token: string };
 }): Promise<{ hadOutput: boolean }> {
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const child = spawn(options.piPath, createPiRpcArgs(options.extensionUri), {
+  const child = spawnNaraya(options.piPath, createPiRpcArgs(options.extensionUri), {
     cwd,
     env: {
       ...process.env,
@@ -84,7 +83,7 @@ async function runPiRpcPrompt(options: {
   };
 
   const sendCommand = (command: object) => {
-    child.stdin.write(`${JSON.stringify(command)}\n`);
+    child.stdin!.write(`${JSON.stringify(command)}\n`);
   };
 
   // Surface the engine's gate prompts (extension_ui_request) as native VS Code
@@ -149,7 +148,7 @@ async function runPiRpcPrompt(options: {
       }, 300);
     });
 
-    child.stdout.on("data", (chunk) => {
+    child.stdout!.on("data", (chunk) => {
       flushLines(chunk, (line) => {
         let event: Record<string, unknown>;
         try {
@@ -193,12 +192,12 @@ async function runPiRpcPrompt(options: {
           return;
         }
         if (event.type === "agent_end") {
-          child.stdin.end();
+          child.stdin!.end();
         }
       });
     });
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr!.on("data", (chunk: Buffer) => {
       stderrBuffer += chunk.toString();
     });
 

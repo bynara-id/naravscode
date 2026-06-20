@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import * as vscode from "vscode";
-import { createPiEnvironment, createPiRpcArgs, ensurePiBinary } from "./pi.ts";
+import { createPiEnvironment, createPiRpcArgs, ensurePiBinary, spawnNaraya } from "./pi.ts";
 
 // Naraya side panel — a Claude-style webview with three sections:
 //   Chat     (9c) — multi-turn in-panel chat streamed via the naraya RPC engine
@@ -126,7 +126,7 @@ export function createNarayaPanelProvider(
 
       // One long-lived RPC child per panel so chat is MULTI-TURN: the in-memory
       // session in that process remembers the conversation across messages.
-      let child: ReturnType<typeof spawn> | undefined;
+      let child: ChildProcess | undefined;
       let wired = false;
 
       const post = (msg: any) => void view.webview.postMessage(msg);
@@ -140,7 +140,7 @@ export function createNarayaPanelProvider(
           return false;
         }
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        child = spawn(naraya, createPiRpcArgs(extensionUri), {
+        child = spawnNaraya(naraya, createPiRpcArgs(extensionUri), {
           cwd,
           env: { ...process.env, ...createPiEnvironment(getBridgeConfig()) },
           stdio: ["pipe", "pipe", "pipe"],

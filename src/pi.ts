@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { accessSync, constants, realpathSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
@@ -93,6 +94,23 @@ export function createPiEnvironment(
     PI_VSCODE_BRIDGE_URL: bridgeConfig.url,
     PI_VSCODE_BRIDGE_TOKEN: bridgeConfig.token,
   };
+}
+
+// Spawn the resolved naraya binary safely across platforms. On Windows the
+// global npm shim is `naraya.cmd`, and modern Node refuses to spawn .cmd/.bat
+// without a shell (CVE-2024-27980) — so run it through the shell with manually
+// quoted args (shell:true does not quote for us). Elsewhere, spawn directly.
+export function spawnNaraya(
+  bin: string,
+  args: string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: any },
+): import("node:child_process").ChildProcess {
+  if (process.platform === "win32") {
+    const quote = (s: string) => (/[\s"&|<>^()]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+    const line = [bin, ...args].map(quote).join(" ");
+    return spawn(line, { ...opts, shell: true, windowsVerbatimArguments: true });
+  }
+  return spawn(bin, args, { ...opts, shell: false });
 }
 
 function createPiBaseArgs(extensionUri: vscode.Uri, contextLines?: string[]): string[] {
