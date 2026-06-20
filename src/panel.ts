@@ -135,11 +135,80 @@ function readTranscript(file: string, limit = 100): Array<{ role: string; text: 
   return out.slice(-limit);
 }
 
+// A short, human label for a tool call (mirrors how the CLI shows it).
+function toolSummary(name: string, args: any): string {
+  if (!args || typeof args !== "object") return "";
+  if (name === "bash") return String(args.command ?? "").slice(0, 200);
+  if (name === "read" || name === "write" || name === "edit" || name === "ast_edit") return String(args.path ?? args.file ?? "");
+  if (name === "grep" || name === "ast_grep") return String(args.pattern ?? args.query ?? "");
+  if (name === "delegate") return String(args.agent ?? "") + (args.task ? ": " + String(args.task).slice(0, 80) : "");
+  if (name === "web_search") return String(args.query ?? "");
+  const k = Object.keys(args)[0];
+  return k ? `${k}: ${String(args[k]).slice(0, 120)}` : "";
+}
+
+// Flatten a tool result into display text (caps length).
+function extractText(result: any): string {
+  if (!result) return "";
+  const c = result.content ?? result;
+  let text = "";
+  if (typeof c === "string") text = c;
+  else if (Array.isArray(c)) text = c.map((p: any) => (typeof p === "string" ? p : typeof p?.text === "string" ? p.text : "")).join("");
+  else if (typeof result.text === "string") text = result.text;
+  text = text.trim();
+  return text.length > 4000 ? text.slice(0, 4000) + "\n… (truncated)" : text;
+}
+
 function nonce(): string {
   let s = "";
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   for (let i = 0; i < 24; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
+}
+
+// --- Editor (extension) chat sessions, kept SEPARATE from the CLI's sessions
+// so the panel's history doesn't mix with terminal sessions (Claude-style). ---
+function editorSessionsDir(): string {
+  return join(agentDir(), "editor-sessions");
+}
+function saveEditorSession(id: string, messages: Array<{ role: string; text: string }>): void {
+  if (!messages.length) return;
+  try {
+    const dir = editorSessionsDir();
+    require("node:fs").mkdirSync(dir, { recursive: true });
+    const title = (messages.find((m) => m.role === "user")?.text || "(chat)").replace(/\s+/g, " ").trim().slice(0, 80);
+    require("node:fs").writeFileSync(join(dir, id + ".json"), JSON.stringify({ id, title, mtime: Date.now(), messages }, null, 2));
+  } catch {
+    /* best-effort */
+  }
+}
+function listEditorSessions(limit = 200): SessionInfo[] {
+  const dir = editorSessionsDir();
+  if (!existsSync(dir)) return [];
+  const out: SessionInfo[] = [];
+  try {
+    for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+      try {
+        const file = join(dir, f);
+        const j = JSON.parse(readFileSync(file, "utf8"));
+        out.push({ file, title: j.title || "(chat)", project: "editor", mtime: j.mtime || statSync(file).mtimeMs });
+      } catch {
+        /* skip */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out.slice(0, limit);
+}
+function readEditorSession(file: string): Array<{ role: string; text: string }> {
+  try {
+    const j = JSON.parse(readFileSync(file, "utf8"));
+    return Array.isArray(j.messages) ? j.messages : [];
+  } catch {
+    return [];
+  }
 }
 
 const ICONS = {
@@ -156,6 +225,9 @@ const ICONS = {
 let chatPanel: vscode.WebviewPanel | undefined;
 let chatChild: ChildProcess | undefined;
 let chatOut: vscode.OutputChannel | undefined;
+let sessId = nonce(); // current editor-session id
+let sessMsgs: Array<{ role: string; text: string }> = [];
+let asstAcc = ""; // assistant text accumulated for the current turn
 
 export function openChatPanel(
   extensionUri: vscode.Uri,
@@ -259,14 +331,23 @@ export function openChatPanel(
         }
         if (ev.type === "message_update") {
           const a = ev.assistantMessageEvent;
-          if (a?.type === "text_delta" && typeof a.delta === "string") post({ type: "chatDelta", delta: a.delta });
+          if (a?.type === "text_delta" && typeof a.delta === "string") { asstAcc += a.delta; post({ type: "chatDelta", delta: a.delta }); }
+          else if (a?.type === "reasoning_delta" && typeof a.delta === "string") post({ type: "chatReason", delta: a.delta });
           return;
         }
-        if (ev.type === "message_end" && ev.message?.role === "assistant") {
-          for (const part of ev.message.content ?? []) if (part.type === "toolCall" && part.name) post({ type: "chatTool", name: part.name });
+        if (ev.type === "tool_execution_start") {
+          post({ type: "toolStart", id: ev.toolCallId, name: ev.toolName, summary: toolSummary(ev.toolName, ev.args) });
           return;
         }
-        if (ev.type === "agent_end") post({ type: "chatDone" });
+        if (ev.type === "tool_execution_end") {
+          post({ type: "toolEnd", id: ev.toolCallId, result: extractText(ev.result), isError: !!ev.isError });
+          return;
+        }
+        if (ev.type === "agent_end") {
+          if (asstAcc.trim()) { sessMsgs.push({ role: "assistant", text: asstAcc.trim() }); saveEditorSession(sessId, sessMsgs); }
+          asstAcc = "";
+          post({ type: "chatDone" });
+        }
       }
     };
 
@@ -274,6 +355,8 @@ export function openChatPanel(
       if (msg?.type === "chat" && typeof msg.text === "string" && msg.text.trim()) {
         if (typeof msg.mode === "string") chatMode = msg.mode;
         if (!(await ensureChild())) return;
+        sessMsgs.push({ role: "user", text: msg.text.trim() });
+        asstAcc = "";
         // Effort -> engine thinking level (only when it changes).
         if (typeof msg.effort === "string" && msg.effort !== chatEffort) {
           chatEffort = msg.effort;
@@ -298,6 +381,7 @@ export function openChatPanel(
           /* ignore */
         }
         chatChild = undefined;
+        sessId = nonce(); sessMsgs = []; asstAcc = "";
       } else if (msg?.type === "stop") {
         try {
           chatChild?.kill();
@@ -321,21 +405,24 @@ export function openChatPanel(
 
   // Fresh chat or load a session transcript into the (possibly reused) panel.
   if (opts.fresh) {
-    try {
-      chatChild?.kill();
-    } catch {
-      /* ignore */
-    }
+    try { chatChild?.kill(); } catch { /* ignore */ }
     chatChild = undefined;
+    sessId = nonce(); sessMsgs = []; asstAcc = "";
     void chatPanel.webview.postMessage({ type: "reset" });
   } else if (opts.sessionFile) {
-    try {
-      chatChild?.kill();
-    } catch {
-      /* ignore */
-    }
+    try { chatChild?.kill(); } catch { /* ignore */ }
     chatChild = undefined;
-    void chatPanel.webview.postMessage({ type: "transcript", messages: readTranscript(opts.sessionFile) });
+    asstAcc = "";
+    if (opts.sessionFile.endsWith(".json")) {
+      // Editor session — resume it (new turns append to the same file).
+      sessId = opts.sessionFile.replace(/^.*[\\/]/, "").replace(/\.json$/, "");
+      sessMsgs = readEditorSession(opts.sessionFile);
+      void chatPanel.webview.postMessage({ type: "transcript", messages: sessMsgs });
+    } else {
+      // CLI session — read-only view; new turns start a fresh editor session.
+      sessId = nonce(); sessMsgs = [];
+      void chatPanel.webview.postMessage({ type: "transcript", messages: readTranscript(opts.sessionFile) });
+    }
   }
 }
 
@@ -353,7 +440,7 @@ export function createNarayaPanelProvider(
         switch (msg?.type) {
           case "ready":
           case "refreshSessions":
-            view.webview.postMessage({ type: "sessions", list: listSessions() });
+            view.webview.postMessage({ type: "sessions", list: msg?.source === "cli" ? listSessions() : listEditorSessions(), source: msg?.source === "cli" ? "cli" : "editor" });
             break;
           case "refreshAccount":
             view.webview.postMessage({ type: "account", result: await fetchAccount() });
@@ -407,6 +494,12 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .body pre code { background: none; padding: 0; }
   .think { opacity: .6; font-style: italic; }
   .tool { font-size: 12px; opacity: .6; font-style: italic; padding: 2px 0; }
+  .reason { font-size: 12px; opacity: .55; font-style: italic; margin: 2px 0 6px; white-space: pre-wrap; border-left: 2px solid var(--vscode-panel-border); padding-left: 8px; }
+  .toolcard { border: 1px solid var(--vscode-panel-border); border-radius: 6px; margin: 6px 0; overflow: hidden; }
+  .toolcard .th { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08)); font-size: 12px; }
+  .toolcard .tn { font-weight: 600; } .toolcard .ts { opacity: .7; font-family: var(--vscode-editor-font-family, monospace); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .toolcard .tstate { opacity: .55; font-size: 11px; } .toolcard.running .tstate { color: var(--vscode-charts-yellow, #d7ba7d); } .toolcard.err .tstate { color: var(--vscode-errorForeground); }
+  .toolcard .tout { margin: 0; padding: 8px 10px; max-height: 280px; overflow: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; white-space: pre-wrap; border-top: 1px solid var(--vscode-panel-border); }
   .barwrap { border-top: 1px solid var(--vscode-panel-border); padding: 10px 14px 12px; position: relative; }
   .bar { display: flex; gap: 8px; align-items: flex-end; }
   textarea { flex: 1; resize: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: inherit; outline: none; max-height: 200px; }
@@ -453,6 +546,9 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
   .view { display: none; padding: 8px 8px; } .view.active { display: block; }
   input { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 6px 8px; border-radius: 5px; outline: none; margin-bottom: 6px; }
   .muted { opacity: .6; padding: 6px 0; }
+  .srctoggle { display: flex; gap: 4px; margin-bottom: 8px; }
+  .srctoggle button { flex: 1; width: auto; background: transparent; color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); border-radius: 5px; padding: 4px 0; opacity: .6; }
+  .srctoggle button.on { opacity: 1; background: var(--vscode-button-secondaryBackground); border-color: var(--vscode-focusBorder); }
   .sess { display: flex; gap: 7px; padding: 4px 6px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; align-items: center; }
   .sess:hover { background: var(--vscode-list-hoverBackground); }
   .sess .ic { opacity: .45; flex: none; } .sess .t { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; } .sess .m { font-size: 10.5px; opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
@@ -466,6 +562,7 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
     <div class="tab" data-v="account">${ICONS.account} Account</div>
   </div>
   <div class="view active" id="v-sessions">
+    <div class="srctoggle"><button data-s="editor" class="on">Editor</button><button data-s="cli">CLI</button></div>
     <input id="search" placeholder="Search sessions…">
     <div id="sessions"><div class="muted">Loading…</div></div>
   </div>
@@ -476,12 +573,17 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
 <script nonce="${n}">
   const vscode = acquireVsCodeApi();
   const IC = ${JSON.stringify(ICONS)};
-  let sessions = [];
+  let sessions = [], src = 'editor';
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x===t));
     document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id==='v-'+t.dataset.v));
-    if (t.dataset.v === 'sessions') vscode.postMessage({ type: 'refreshSessions' });
+    if (t.dataset.v === 'sessions') vscode.postMessage({ type: 'refreshSessions', source: src });
     if (t.dataset.v === 'account') vscode.postMessage({ type: 'refreshAccount' });
+  });
+  document.querySelectorAll('.srctoggle button').forEach(b => b.onclick = () => {
+    src = b.dataset.s;
+    document.querySelectorAll('.srctoggle button').forEach(x => x.classList.toggle('on', x===b));
+    vscode.postMessage({ type: 'refreshSessions', source: src });
   });
   document.getElementById('new').onclick = () => vscode.postMessage({ type: 'newChat' });
   function renderSessions() {
