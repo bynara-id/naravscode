@@ -315,6 +315,15 @@ export function openChatPanel(
                 send({ type: "extension_ui_response", id, confirmed: pick === "Allow" });
               } else if (method === "select") {
                 const o = Array.isArray(ev.options) ? ev.options.map(String) : [];
+                // Auto mode: gate prompts arrive as a select (Allow once / Allow
+                // for this session / Auto-approve all / Deny). Pick the strongest
+                // allow so the engine stops asking for the rest of the session.
+                if (chatMode === "auto" && o.length) {
+                  const pick = o.find((x) => /auto-approve/i.test(x)) || o.find((x) => /this session/i.test(x)) || o.find((x) => /allow/i.test(x)) || o[0];
+                  send({ type: "extension_ui_response", id, value: pick });
+                  post({ type: "chatTool", name: "auto-approved: " + String(ev.title ?? "action") });
+                  return;
+                }
                 const c = await vscode.window.showQuickPick(o, { title: String(ev.title ?? "Select") });
                 send(c === undefined ? { type: "extension_ui_response", id, cancelled: true } : { type: "extension_ui_response", id, value: c });
               } else if (method === "input") {
