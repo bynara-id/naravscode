@@ -1,11 +1,12 @@
-// Naraya chat webview (external asset → no template-literal escaping).
-// window.__naraya = { logo } injected by host.
+// Naraya chat webview — minimal Claude-Code-style rendering (no avatars/role
+// labels; tool calls as compact dot+line steps; final answer flows at the end).
 (function () {
   const vscode = acquireVsCodeApi();
-  const LOGO = (window.__naraya && window.__naraya.logo) || "";
   const log = document.getElementById("log");
   const input = document.getElementById("in");
   let streaming = false, empty = true;
+  let curText = null, curRaw = "", thinkingEl = null;
+  const tools = {};
 
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
@@ -51,64 +52,46 @@
     return html;
   }
   function render(el, text) { try { el.innerHTML = md(text); } catch (e) { el.textContent = text; } }
-
-  // ---- current assistant turn state (interleaved text + tool cards) ----
-  let col = null;        // the assistant message column receiving content
-  let curText = null;    // current open text block (null after a tool card)
-  let curRaw = "";       // raw markdown for curText
-  let thinkingEl = null;
-  const tools = {};
+  function scroll() { log.scrollTop = log.scrollHeight; }
 
   function welcome() {
     log.innerHTML =
-      '<div class="welcome"><img src="' + LOGO + '"><h2>Naraya AI</h2>' +
-      "<p>Runs the Naraya engine in this workspace. Type @ to reference a file.</p>" +
+      '<div class="welcome"><h2>Naraya AI</h2>' +
+      "<p>Ask it to build, fix, or explain. Type @ to reference a file.</p>" +
       '<div><span class="chip">Explain this file</span><span class="chip">Find bugs</span><span class="chip">Write tests</span></div></div>';
     for (const c of log.querySelectorAll(".chip")) c.onclick = function () { input.value = c.textContent; input.focus(); resize(); };
   }
-  function msgCol(who, cls, av) {
-    if (empty) { log.innerHTML = ""; empty = false; }
-    const d = document.createElement("div");
-    d.className = "msg " + cls;
-    d.innerHTML = av + '<div class="col"><div class="who">' + who + "</div></div>";
-    log.appendChild(d); log.scrollTop = log.scrollHeight;
-    return d.querySelector(".col");
-  }
-  function newTextBlock() { const b = document.createElement("div"); b.className = "body"; col.appendChild(b); return b; }
+  function fresh() { if (empty) { log.innerHTML = ""; empty = false; } }
+  function newText() { fresh(); const b = document.createElement("div"); b.className = "body"; log.appendChild(b); return b; }
   function clearThinking() { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } }
-  function scroll() { log.scrollTop = log.scrollHeight; }
 
   function send() {
     const t = input.value.trim(); if (!t || streaming) return;
-    const uc = msgCol("You", "user", '<span class="avatar av-u">U</span>');
-    const ub = newTextBlockIn(uc); ub.classList.add("usertext"); ub.textContent = t;
-    input.value = ""; resize(); streaming = true;
-    col = msgCol("Naraya", "assistant", '<img class="avatar" src="' + LOGO + '">');
-    curText = null; curRaw = "";
-    thinkingEl = document.createElement("div"); thinkingEl.className = "think"; thinkingEl.textContent = "Naraya is thinking…";
-    col.appendChild(thinkingEl);
+    fresh();
+    const u = document.createElement("div"); u.className = "umsg"; u.textContent = t; log.appendChild(u);
+    input.value = ""; resize(); streaming = true; curText = null; curRaw = "";
+    thinkingEl = document.createElement("div"); thinkingEl.className = "step thinking";
+    thinkingEl.innerHTML = '<span class="dot run"></span><span class="thought">Thinking…</span>';
+    log.appendChild(thinkingEl); scroll();
     vscode.postMessage({ type: "chat", text: t, mode: modeSel.value, effort: effortSel.value });
   }
-  function newTextBlockIn(c) { const b = document.createElement("div"); b.className = "body"; c.appendChild(b); return b; }
   function resize() { input.style.height = "auto"; input.style.height = Math.min(200, input.scrollHeight) + "px"; }
 
-  function startToolCard(id, name, summary) {
-    if (!col) col = msgCol("Naraya", "assistant", '<img class="avatar" src="' + LOGO + '">');
-    clearThinking();
-    curText = null; // a following text reply becomes a NEW block BELOW this card
-    const card = document.createElement("div");
-    card.className = "toolcard running";
-    card.innerHTML =
-      '<div class="th"><span class="tn">⚙ ' + esc(name) + "</span>" +
-      '<span class="ts"></span><span class="tstate">running…</span></div>' +
-      '<pre class="tout" style="display:none"></pre>';
-    if (summary) card.querySelector(".ts").textContent = summary;
-    card.querySelector(".th").onclick = function () {
-      const o = card.querySelector(".tout");
-      if (o.textContent) o.style.display = o.style.display === "none" ? "block" : "none";
+  function startTool(id, name, summary) {
+    clearThinking(); fresh(); curText = null;
+    const step = document.createElement("div");
+    step.className = "step";
+    step.innerHTML =
+      '<span class="dot run"></span>' +
+      '<div class="sbody"><div class="shead"><b>' + esc(name) + '</b> <span class="args"></span><span class="ststate">running</span></div>' +
+      '<pre class="tout" style="display:none"></pre></div>';
+    if (summary) step.querySelector(".args").textContent = summary;
+    step.querySelector(".shead").onclick = function () {
+      const o = step.querySelector(".tout");
+      if (o.textContent || o.querySelector("img")) o.style.display = o.style.display === "none" ? "block" : "none";
     };
-    col.appendChild(card); tools[id] = card; scroll();
-    return card;
+    log.appendChild(step); tools[id] = step; scroll();
+    return step;
   }
 
   // ---- @ file mention ----
@@ -143,7 +126,7 @@
 
   document.getElementById("send").onclick = send;
   document.getElementById("new").onclick = function () {
-    vscode.postMessage({ type: "newChat" }); empty = true; col = null; curText = null; curRaw = ""; streaming = false; welcome();
+    vscode.postMessage({ type: "newChat" }); empty = true; curText = null; curRaw = ""; streaming = false; welcome();
   };
   input.addEventListener("input", function () { resize(); showMentions(); });
   input.addEventListener("keydown", function (e) {
@@ -163,39 +146,36 @@
     const m = e.data;
     if (m.type === "chatDelta") {
       clearThinking();
-      if (!curText) { curText = newTextBlock(); curRaw = ""; }
+      if (!curText) { curText = newText(); curRaw = ""; }
       curRaw += m.delta; render(curText, curRaw); scroll();
     } else if (m.type === "chatReason") {
       clearThinking();
-      let r = col && col.querySelector(".reason.live");
-      if (!r) { r = document.createElement("div"); r.className = "reason live"; r.dataset.raw = ""; if (col) col.appendChild(r); }
+      let r = log.querySelector(".reason.live");
+      if (!r) { fresh(); r = document.createElement("div"); r.className = "reason live"; r.dataset.raw = ""; log.appendChild(r); }
       r.dataset.raw += m.delta; r.textContent = "💭 " + r.dataset.raw.slice(-500); scroll();
-    } else if (m.type === "toolStart") { startToolCard(m.id, m.name, m.summary); }
+    } else if (m.type === "toolStart") { startTool(m.id, m.name, m.summary); }
     else if (m.type === "toolEnd") {
-      const card = tools[m.id] || startToolCard(m.id, "tool", "");
-      card.classList.remove("running"); card.classList.toggle("err", !!m.isError);
-      card.querySelector(".tstate").textContent = m.isError ? "error" : "done";
-      const out = card.querySelector(".tout");
-      if (m.result) { out.textContent = m.result; }
+      const step = tools[m.id] || startTool(m.id, "tool", "");
+      const dot = step.querySelector(".dot"); dot.className = "dot " + (m.isError ? "err" : "ok");
+      step.querySelector(".ststate").textContent = m.isError ? "error" : "done";
+      if (m.result) step.querySelector(".tout").textContent = m.result;
       scroll();
     } else if (m.type === "toolImage") {
-      const card = tools[m.id];
-      if (card && m.src) { const img = document.createElement("img"); img.className = "toolimg"; img.src = m.src; card.appendChild(img); scroll(); }
+      const step = tools[m.id];
+      if (step && m.src) { const o = step.querySelector(".tout"); const img = document.createElement("img"); img.className = "toolimg"; img.src = m.src; o.appendChild(img); o.style.display = "block"; scroll(); }
     } else if (m.type === "chatDone") {
       streaming = false; clearThinking();
-      const live = col && col.querySelector(".reason.live"); if (live) live.classList.remove("live");
+      const live = log.querySelector(".reason.live"); if (live) live.classList.remove("live");
     } else if (m.type === "chatError") {
-      clearThinking();
-      const d = document.createElement("div"); d.className = "tool"; d.textContent = "[error: " + m.error + "]";
-      if (col) col.appendChild(d); streaming = false;
-    } else if (m.type === "reset") { empty = true; col = null; curText = null; curRaw = ""; streaming = false; welcome(); }
+      clearThinking(); fresh();
+      const d = document.createElement("div"); d.className = "errline"; d.textContent = "error: " + m.error; log.appendChild(d); streaming = false;
+    } else if (m.type === "reset") { empty = true; curText = null; curRaw = ""; streaming = false; welcome(); }
     else if (m.type === "files") { files = m.list || []; }
     else if (m.type === "transcript") {
-      empty = true; col = null; curText = null; curRaw = ""; log.innerHTML = "";
+      empty = true; curText = null; curRaw = ""; log.innerHTML = "";
       for (const x of (m.messages || [])) {
-        const c = msgCol(x.role === "user" ? "You" : "Naraya", x.role, x.role === "user" ? '<span class="avatar av-u">U</span>' : '<img class="avatar" src="' + LOGO + '">');
-        const b = newTextBlockIn(c);
-        if (x.role === "user") { b.classList.add("usertext"); b.textContent = x.text; } else render(b, x.text);
+        if (x.role === "user") { fresh(); const u = document.createElement("div"); u.className = "umsg"; u.textContent = x.text; log.appendChild(u); }
+        else { const b = newText(); render(b, x.text); }
       }
       if (!(m.messages || []).length) welcome();
     }

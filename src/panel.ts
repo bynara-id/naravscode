@@ -504,59 +504,68 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   :root { color-scheme: light dark; } * { box-sizing: border-box; }
   html,body { height: 100%; margin: 0; }
   body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); display: flex; flex-direction: column; }
-  .top { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
-  .top img { width: 20px; height: 20px; } .top strong { flex: 1; }
-  .top button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px; }
-  #log { flex: 1; overflow-y: auto; padding: 14px 20px; }
-  .welcome { text-align: center; padding: 48px 16px; }
-  .welcome img { width: 48px; height: 48px; margin-bottom: 12px; }
-  .welcome h2 { margin: 4px 0; } .welcome p { opacity: .65; margin: 6px 0 18px; }
-  .chip { display: inline-block; margin: 5px; padding: 8px 14px; border: 1px solid var(--vscode-panel-border); border-radius: 16px; cursor: pointer; }
+  .top { display: flex; align-items: center; gap: 8px; padding: 8px 14px; }
+  .top img { width: 18px; height: 18px; } .top strong { flex: 1; font-size: 13px; }
+  .top button { background: transparent; color: var(--vscode-foreground); opacity: .7; border: 1px solid var(--vscode-panel-border); padding: 4px 9px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .top button:hover { opacity: 1; }
+  #log { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
+  .welcome { text-align: center; padding: 60px 16px; }
+  .welcome h2 { margin: 4px 0; } .welcome p { opacity: .6; margin: 6px 0 18px; }
+  .chip { display: inline-block; margin: 5px; padding: 7px 13px; border: 1px solid var(--vscode-panel-border); border-radius: 16px; cursor: pointer; font-size: 13px; }
   .chip:hover { background: var(--vscode-list-hoverBackground); }
-  .msg { padding: 12px 0; display: flex; gap: 10px; }
-  .msg .avatar { width: 24px; height: 24px; border-radius: 6px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; }
-  .av-u { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-  .msg .col { min-width: 0; flex: 1; } .msg .who { font-size: 12px; opacity: .6; margin-bottom: 3px; }
-  .msg .body { word-break: break-word; line-height: 1.6; }
-  .msg.user .body, .body.usertext { white-space: pre-wrap; }
-  .body table { border-collapse: collapse; margin: 6px 0; font-size: .95em; }
-  .body th, .body td { border: 1px solid var(--vscode-panel-border); padding: 3px 9px; text-align: left; }
-  .body th { background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08)); }
-  .toolimg { max-width: 100%; border-radius: 6px; margin: 6px 0; border: 1px solid var(--vscode-panel-border); }
-  .body p { margin: 4px 0; } .body h2,.body h3 { margin: 10px 0 3px; font-size: 1.03em; }
-  .body ul,.body ol { margin: 3px 0; padding-left: 20px; } .body li { margin: 1px 0; }
+  /* user turn */
+  .umsg { background: var(--vscode-input-background); border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 8px 12px; margin: 16px 0 10px; white-space: pre-wrap; word-break: break-word; }
+  /* tool / thinking steps (compact dot + line) */
+  .step { display: flex; gap: 9px; align-items: flex-start; margin: 4px 0; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--vscode-descriptionForeground, #888); }
+  .dot.run { background: var(--vscode-charts-yellow, #d7ba7d); } .dot.ok { background: var(--vscode-charts-green, #89d185); } .dot.err { background: var(--vscode-errorForeground); }
+  .step .sbody { min-width: 0; flex: 1; }
+  .shead { display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
+  .shead b { font-weight: 600; flex: none; } .args { opacity: .6; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .ststate { opacity: .45; font-size: 11px; flex: none; }
+  .thought { opacity: .55; font-style: italic; }
+  .tout { margin: 4px 0 2px; padding: 8px 10px; max-height: 300px; overflow: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; white-space: pre-wrap; background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.12)); border-radius: 6px; }
+  .reason { opacity: .5; font-style: italic; font-size: 12.5px; margin: 4px 0; white-space: pre-wrap; }
+  .errline { color: var(--vscode-errorForeground); font-size: 12px; margin: 4px 0; }
+  .toolimg { max-width: 100%; border-radius: 6px; margin: 4px 0; }
+  /* assistant markdown */
+  .body { word-break: break-word; line-height: 1.6; margin: 2px 0; }
+  .body p { margin: 5px 0; } .body h2,.body h3 { margin: 12px 0 4px; font-size: 1.04em; }
+  .body ul,.body ol { margin: 4px 0; padding-left: 22px; } .body li { margin: 2px 0; }
   .body a { color: var(--vscode-textLink-foreground); }
   .body code { background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.16)); padding: 1px 5px; border-radius: 4px; font-family: var(--vscode-editor-font-family, monospace); font-size: .92em; }
   .body pre { background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.16)); padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
   .body pre code { background: none; padding: 0; }
-  .think { opacity: .6; font-style: italic; }
-  .tool { font-size: 12px; opacity: .6; font-style: italic; padding: 2px 0; }
-  .reason { font-size: 12px; opacity: .55; font-style: italic; margin: 2px 0 6px; white-space: pre-wrap; border-left: 2px solid var(--vscode-panel-border); padding-left: 8px; }
-  .toolcard { border: 1px solid var(--vscode-panel-border); border-radius: 6px; margin: 6px 0; overflow: hidden; }
-  .toolcard .th { display: flex; gap: 8px; align-items: center; padding: 6px 10px; cursor: pointer; background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08)); font-size: 12px; }
-  .toolcard .tn { font-weight: 600; } .toolcard .ts { opacity: .7; font-family: var(--vscode-editor-font-family, monospace); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-  .toolcard .tstate { opacity: .55; font-size: 11px; } .toolcard.running .tstate { color: var(--vscode-charts-yellow, #d7ba7d); } .toolcard.err .tstate { color: var(--vscode-errorForeground); }
-  .toolcard .tout { margin: 0; padding: 8px 10px; max-height: 280px; overflow: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; white-space: pre-wrap; border-top: 1px solid var(--vscode-panel-border); }
-  .barwrap { border-top: 1px solid var(--vscode-panel-border); padding: 10px 14px 12px; position: relative; }
-  .bar { display: flex; gap: 8px; align-items: flex-end; }
-  textarea { flex: 1; resize: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: inherit; outline: none; max-height: 200px; }
-  textarea:focus { border-color: var(--vscode-focusBorder); }
-  .bar button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 8px; padding: 0 14px; height: 36px; cursor: pointer; }
-  .controls { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 12px; opacity: .85; }
-  .controls label { display: flex; gap: 5px; align-items: center; opacity: .7; }
-  select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); border-radius: 5px; padding: 3px 6px; font-size: 12px; }
-  #mention { position: absolute; left: 14px; right: 14px; bottom: 64px; max-height: 220px; overflow-y: auto; background: var(--vscode-editorWidget-background, var(--vscode-input-background)); border: 1px solid var(--vscode-panel-border); border-radius: 8px; display: none; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+  .body table { border-collapse: collapse; margin: 6px 0; font-size: .95em; }
+  .body th, .body td { border: 1px solid var(--vscode-panel-border); padding: 3px 9px; text-align: left; }
+  .body th { background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08)); }
+  /* composer (contained, Claude-style) */
+  .barwrap { padding: 6px 14px 14px; position: relative; }
+  .composer { max-width: 880px; margin: 0 auto; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-input-background); padding: 8px 10px; }
+  .composer:focus-within { border-color: var(--vscode-focusBorder); }
+  textarea { width: 100%; resize: none; background: transparent; color: var(--vscode-input-foreground); border: none; outline: none; font-family: inherit; font-size: inherit; max-height: 200px; padding: 2px; }
+  .cfoot { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .cfoot .grow { flex: 1; }
+  .cfoot label { display: flex; gap: 4px; align-items: center; font-size: 11px; opacity: .65; }
+  select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); border-radius: 5px; padding: 2px 5px; font-size: 11px; }
+  #send { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 8px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+  #send:hover { background: var(--vscode-button-hoverBackground); }
+  #mention { position: absolute; left: 50%; transform: translateX(-50%); width: min(880px, calc(100% - 28px)); bottom: 78px; max-height: 220px; overflow-y: auto; background: var(--vscode-editorWidget-background, var(--vscode-input-background)); border: 1px solid var(--vscode-panel-border); border-radius: 8px; display: none; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
   .mi { padding: 6px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
   .mi.sel, .mi:hover { background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-list-activeSelectionForeground); }
 </style></head><body>
-  <div class="top"><img src="${logo}"><strong>Naraya AI</strong><button id="new">+ New chat</button></div>
+  <div class="top"><img src="${logo}"><strong>Naraya</strong><button id="new">+ New chat</button></div>
   <div id="log"></div>
   <div class="barwrap">
     <div id="mention"></div>
-    <div class="bar"><textarea id="in" rows="1" placeholder="Message Naraya…  (@ to mention a file · Enter to send)"></textarea><button id="send">${ICONS.send}</button></div>
-    <div class="controls">
-      <label>Mode <select id="mode"><option value="ask">Ask</option><option value="auto" selected>Auto</option><option value="plan">Plan</option></select></label>
-      <label>Effort <select id="effort"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
+    <div class="composer">
+      <textarea id="in" rows="1" placeholder="Message Naraya…  (@ to mention a file)"></textarea>
+      <div class="cfoot">
+        <label>Mode <select id="mode"><option value="ask">Ask</option><option value="auto" selected>Auto</option><option value="plan">Plan</option></select></label>
+        <label>Effort <select id="effort"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
+        <span class="grow"></span>
+        <button id="send">${ICONS.send}</button>
+      </div>
     </div>
   </div>
 <script nonce="${n}">window.__naraya = { logo: ${JSON.stringify(String(logo))} };</script>
