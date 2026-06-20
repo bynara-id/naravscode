@@ -496,6 +496,7 @@ export function createNarayaPanelProvider(
 function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const n = nonce();
   const logo = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "assets", "logo.svg"));
+  const icon = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "assets", "icon.png"));
   const chatJs = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "assets", "webview", "chat.js"));
   const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${n}';`;
   return `<!DOCTYPE html><html lang="en"><head>
@@ -509,7 +510,8 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .top button { background: transparent; color: var(--vscode-foreground); opacity: .7; border: 1px solid var(--vscode-panel-border); padding: 4px 9px; border-radius: 6px; cursor: pointer; font-size: 12px; }
   .top button:hover { opacity: 1; }
   #log { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
-  .welcome { text-align: center; padding: 60px 16px; }
+  .welcome { text-align: center; padding: 56px 16px; }
+  .welcome .wlogo { width: 56px; height: 56px; border-radius: 12px; margin-bottom: 12px; }
   .welcome h2 { margin: 4px 0; } .welcome p { opacity: .6; margin: 6px 0 18px; }
   .chip { display: inline-block; margin: 5px; padding: 7px 13px; border: 1px solid var(--vscode-panel-border); border-radius: 16px; cursor: pointer; font-size: 13px; }
   .chip:hover { background: var(--vscode-list-hoverBackground); }
@@ -568,7 +570,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
       </div>
     </div>
   </div>
-<script nonce="${n}">window.__naraya = { logo: ${JSON.stringify(String(logo))} };</script>
+<script nonce="${n}">window.__naraya = { logo: ${JSON.stringify(String(logo))}, icon: ${JSON.stringify(String(icon))} };</script>
 <script nonce="${n}" src="${chatJs}"></script>
 </body></html>`;
 }

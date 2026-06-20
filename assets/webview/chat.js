@@ -2,6 +2,7 @@
 // labels; tool calls as compact dot+line steps; final answer flows at the end).
 (function () {
   const vscode = acquireVsCodeApi();
+  const ICON = (window.__naraya && (window.__naraya.icon || window.__naraya.logo)) || "";
   const log = document.getElementById("log");
   const input = document.getElementById("in");
   let streaming = false, empty = true;
@@ -56,7 +57,7 @@
 
   function welcome() {
     log.innerHTML =
-      '<div class="welcome"><h2>Naraya AI</h2>' +
+      '<div class="welcome">' + (ICON ? '<img class="wlogo" src="' + ICON + '">' : "") + "<h2>Naraya AI</h2>" +
       "<p>Ask it to build, fix, or explain. Type @ to reference a file.</p>" +
       '<div><span class="chip">Explain this file</span><span class="chip">Find bugs</span><span class="chip">Write tests</span></div></div>';
     for (const c of log.querySelectorAll(".chip")) c.onclick = function () { input.value = c.textContent; input.focus(); resize(); };
