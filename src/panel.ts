@@ -319,7 +319,7 @@ export function openChatPanel(
                 // for this session / Auto-approve all / Deny). Pick the strongest
                 // allow so the engine stops asking for the rest of the session.
                 if (chatMode === "auto" && o.length) {
-                  const pick = o.find((x) => /auto-approve/i.test(x)) || o.find((x) => /this session/i.test(x)) || o.find((x) => /allow/i.test(x)) || o[0];
+                  const pick = o.find((x: string) => /auto-approve/i.test(x)) || o.find((x: string) => /this session/i.test(x)) || o.find((x: string) => /allow/i.test(x)) || o[0];
                   send({ type: "extension_ui_response", id, value: pick });
                   post({ type: "chatTool", name: "auto-approved: " + String(ev.title ?? "action") });
                   return;
