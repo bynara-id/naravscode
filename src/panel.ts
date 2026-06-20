@@ -351,7 +351,8 @@ export function createNarayaPanelProvider(
 function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const n = nonce();
   const logo = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "assets", "logo.svg"));
-  const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${n}';`;
+  const chatJs = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "assets", "webview", "chat.js"));
+  const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${n}';`;
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="${csp}">
 <style>
@@ -371,7 +372,15 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .msg .avatar { width: 24px; height: 24px; border-radius: 6px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; }
   .av-u { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
   .msg .col { min-width: 0; flex: 1; } .msg .who { font-size: 12px; opacity: .6; margin-bottom: 3px; }
-  .msg .body { white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+  .msg .body { word-break: break-word; line-height: 1.6; }
+  .msg.user .body { white-space: pre-wrap; }
+  .body p { margin: 6px 0; } .body h2,.body h3 { margin: 12px 0 4px; font-size: 1.05em; }
+  .body ul,.body ol { margin: 4px 0; padding-left: 22px; } .body li { margin: 2px 0; }
+  .body a { color: var(--vscode-textLink-foreground); }
+  .body code { background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.16)); padding: 1px 5px; border-radius: 4px; font-family: var(--vscode-editor-font-family, monospace); font-size: .92em; }
+  .body pre { background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.16)); padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+  .body pre code { background: none; padding: 0; }
+  .think { opacity: .6; font-style: italic; }
   .tool { font-size: 12px; opacity: .6; font-style: italic; padding: 2px 0; }
   .barwrap { border-top: 1px solid var(--vscode-panel-border); padding: 12px; }
   .bar { display: flex; gap: 8px; max-width: 820px; margin: 0 auto; }
@@ -382,52 +391,9 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   <div class="top"><img src="${logo}"><strong>Naraya AI</strong><button id="new">+ New chat</button></div>
   <div id="log"></div>
   <div class="barwrap"><div class="bar"><textarea id="in" rows="1" placeholder="Message Naraya…  (Enter to send, Shift+Enter for newline)"></textarea><button id="send">${ICONS.send}</button></div></div>
-<script nonce="${n}">
-  const vscode = acquireVsCodeApi();
-  const LOGO = ${JSON.stringify(String(logo))};
-  const log = document.getElementById('log'), input = document.getElementById('in');
-  let streaming = false, body = null, empty = true;
-  function welcome() {
-    log.innerHTML = '<div class="welcome"><img src="'+LOGO+'"><h2>Naraya AI</h2>'
-      + '<p>Runs the Naraya engine in this workspace — build, fix, explain. Reads & edits files with your permission.</p>'
-      + '<div><span class="chip">Explain this file</span><span class="chip">Find bugs</span><span class="chip">Write tests</span></div></div>';
-    log.querySelectorAll('.chip').forEach(c => c.onclick = () => { input.value = c.textContent; input.focus(); });
-  }
-  function add(who, cls, av) {
-    if (empty) { log.innerHTML = ''; empty = false; }
-    const d = document.createElement('div'); d.className = 'msg ' + cls;
-    d.innerHTML = av + '<div class="col"><div class="who">'+who+'</div><div class="body"></div></div>';
-    log.appendChild(d); log.scrollTop = log.scrollHeight; return d.querySelector('.body');
-  }
-  function send() {
-    const t = input.value.trim(); if (!t || streaming) return;
-    add('You', 'user', '<span class="avatar av-u">U</span>').textContent = t;
-    input.value = ''; input.style.height = 'auto'; streaming = true;
-    body = add('Naraya', 'assistant', '<img class="avatar" src="'+LOGO+'">');
-    vscode.postMessage({ type: 'chat', text: t });
-  }
-  document.getElementById('send').onclick = send;
-  document.getElementById('new').onclick = () => { vscode.postMessage({ type: 'newChat' }); empty = true; body = null; streaming = false; welcome(); };
-  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(160, input.scrollHeight) + 'px'; });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-  window.addEventListener('message', e => {
-    const m = e.data;
-    if (m.type === 'chatDelta') { if (body) { body.textContent += m.delta; log.scrollTop = log.scrollHeight; } }
-    else if (m.type === 'chatTool') { const t = document.createElement('div'); t.className='tool'; t.textContent='⚙ '+m.name; if (body) body.parentElement.appendChild(t); log.scrollTop = log.scrollHeight; }
-    else if (m.type === 'chatDone') streaming = false;
-    else if (m.type === 'chatError') { if (body) body.textContent += '\\n[error: '+m.error+']'; streaming = false; }
-    else if (m.type === 'reset') { empty = true; body = null; streaming = false; welcome(); }
-    else if (m.type === 'transcript') {
-      empty = true; body = null; log.innerHTML = '';
-      for (const x of (m.messages||[])) {
-        const av = x.role === 'user' ? '<span class="avatar av-u">U</span>' : '<img class="avatar" src="'+LOGO+'">';
-        add(x.role === 'user' ? 'You' : 'Naraya', x.role, av).textContent = x.text;
-      }
-      if (!(m.messages||[]).length) welcome();
-    }
-  });
-  welcome();
-</script></body></html>`;
+<script nonce="${n}">window.__naraya = { logo: ${JSON.stringify(String(logo))} };</script>
+<script nonce="${n}" src="${chatJs}"></script>
+</body></html>`;
 }
 
 function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
@@ -446,12 +412,12 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
   .tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); }
   .tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 4px; cursor: pointer; opacity: .6; border-bottom: 2px solid transparent; font-size: 12px; }
   .tab.active { opacity: 1; border-bottom-color: var(--vscode-focusBorder); color: var(--vscode-focusBorder); }
-  .view { display: none; padding: 10px 12px; } .view.active { display: block; }
-  input { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 7px 9px; border-radius: 5px; outline: none; margin-bottom: 8px; }
+  .view { display: none; padding: 8px 8px; } .view.active { display: block; }
+  input { width: 100%; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 6px 8px; border-radius: 5px; outline: none; margin-bottom: 6px; }
   .muted { opacity: .6; padding: 6px 0; }
-  .sess { display: flex; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
-  .sess:hover { background: var(--vscode-list-hoverBackground); border-color: var(--vscode-panel-border); }
-  .sess .ic { opacity: .5; margin-top: 1px; } .sess .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .sess .m { font-size: 11px; opacity: .55; }
+  .sess { display: flex; gap: 7px; padding: 4px 6px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; align-items: center; }
+  .sess:hover { background: var(--vscode-list-hoverBackground); }
+  .sess .ic { opacity: .45; flex: none; } .sess .t { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; } .sess .m { font-size: 10.5px; opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
   h3 { margin: 4px 0 6px; font-size: 11px; text-transform: uppercase; opacity: .65; }
   .row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--vscode-panel-border); } .row:last-child { border: 0; } .row .k { opacity: .7; } .row .v { font-weight: 600; text-align: right; }
 </style></head><body>
