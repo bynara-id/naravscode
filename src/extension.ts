@@ -96,6 +96,11 @@ export async function activate(context: vscode.ExtensionContext) {
       await vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }),
     vscode.commands.registerCommand("naraya.upgrade", upgradePiBinary),
+    // Empty tree so the activity-bar view shows its welcome content (buttons).
+    vscode.window.registerTreeDataProvider("naraya.home", {
+      getChildren: () => [],
+      getTreeItem: (element: vscode.TreeItem) => element,
+    }),
     vscode.window.registerTerminalProfileProvider("naraya.terminal-profile", {
       provideTerminalProfile() {
         const terminalId = randomUUID();

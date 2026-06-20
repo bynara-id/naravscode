@@ -1,7 +1,7 @@
 {
   "name": "naraya-vscode",
   "displayName": "Naraya AI",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "VS Code extension for the Naraya AI coding agent",
   "categories": [
     "AI",
@@ -131,6 +131,30 @@
       {
         "command": "naraya.open",
         "key": "ctrl+alt+3"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "naraya",
+          "title": "Naraya",
+          "icon": "assets/logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "naraya": [
+        {
+          "id": "naraya.home",
+          "name": "Naraya",
+          "type": "tree"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "naraya.home",
+        "contents": "Naraya AI — your coding agent in the editor.\n\n[$(terminal) Open Naraya Terminal](command:naraya.open)\n[$(key) Sign in with Naraya](command:naraya.signIn)\n[$(arrow-up) Upgrade Naraya CLI](command:naraya.upgrade)\n\nUse [$(sparkle) @naraya] in the chat panel for AI replies."
       }
     ]
   },
