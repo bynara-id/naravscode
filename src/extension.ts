@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
+import { registerAuth } from "./auth.ts";
 import { createBridge } from "./bridge/server.ts";
 import { createChatHandler } from "./chat.ts";
 import { TERMINAL_TITLE } from "./constants.ts";
@@ -14,6 +15,10 @@ let bridgeDispose: (() => Promise<void>) | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   extensionUri = context.extensionUri;
+
+  // Sign in with Naraya (vscode:// callback) — registers naraya.signIn + the URI
+  // handler. Gateway-side /connect/cli?mode=vscode redirect is Plan 02 Task 3.
+  registerAuth(context);
 
   const sessions = createSessionTracker(context);
   const bridge = await createBridge(context, (terminalId, sessionFile) => {
