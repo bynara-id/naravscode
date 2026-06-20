@@ -119,6 +119,7 @@ export function createNarayaPanelProvider(
   getBridgeConfig: () => { url: string; token: string } | undefined,
   openTerminal: (extraArgs?: string[]) => Promise<vscode.Terminal | undefined>,
 ): vscode.WebviewViewProvider {
+  const out = vscode.window.createOutputChannel("Naraya");
   return {
     resolveWebviewView(view) {
       view.webview.options = { enableScripts: true, localResourceRoots: [extensionUri] };
@@ -136,15 +137,20 @@ export function createNarayaPanelProvider(
         if (child) return true;
         const naraya = await ensurePiBinary();
         if (!naraya) {
+          out.appendLine("[chat] naraya binary NOT found");
           post({ type: "chatError", error: "Naraya CLI not found on PATH." });
           return false;
         }
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        child = spawnNaraya(naraya, createPiRpcArgs(extensionUri), {
+        const rpcArgs = createPiRpcArgs(extensionUri);
+        out.appendLine(`[chat] spawn: ${naraya} ${rpcArgs.join(" ")}`);
+        out.appendLine(`[chat] cwd=${cwd ?? "(none)"} platform=${process.platform}`);
+        child = spawnNaraya(naraya, rpcArgs, {
           cwd,
           env: { ...process.env, ...createPiEnvironment(getBridgeConfig()) },
           stdio: ["pipe", "pipe", "pipe"],
         });
+        child.stderr?.on("data", (d) => out.appendLine(`[chat:stderr] ${d.toString().trimEnd()}`));
         wired = false;
         const decoder = new StringDecoder("utf8");
         let buf = "";
@@ -164,11 +170,13 @@ export function createNarayaPanelProvider(
             handleEvent(ev);
           }
         });
-        child.on("close", () => {
+        child.on("close", (code) => {
+          out.appendLine(`[chat] process closed (code ${code})`);
           child = undefined;
           post({ type: "chatDone" });
         });
         child.on("error", (e) => {
+          out.appendLine(`[chat] spawn error: ${String(e?.message ?? e)}`);
           child = undefined;
           post({ type: "chatError", error: String(e?.message ?? e) });
         });
