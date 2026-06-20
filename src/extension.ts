@@ -65,7 +65,7 @@ export async function activate(context: vscode.ExtensionContext) {
   participant.iconPath = logoIcon;
 
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.text = "$(naraya-logo) Naraya";
+  statusBarItem.text = "$(sparkle) Naraya";
   statusBarItem.tooltip = "Open Naraya Terminal";
   statusBarItem.command = "naraya.open";
   statusBarItem.show();
