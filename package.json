@@ -1,7 +1,7 @@
 {
   "name": "naraya-vscode",
   "displayName": "Naraya AI",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "VS Code extension for the Naraya AI coding agent",
   "categories": [
     "AI",

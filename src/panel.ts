@@ -114,6 +114,31 @@ function describeSession(file: string): { title: string; project: string } {
   return { title: title || "(untitled session)", project: project || "" };
 }
 
+// Read a session JSONL into a flat transcript (user/assistant text only),
+// capped to the last N turns so the panel stays responsive.
+function readTranscript(file: string, limit = 100): Array<{ role: string; text: string }> {
+  const out: Array<{ role: string; text: string }> = [];
+  try {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      let rec: any;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const msg = rec?.message ?? rec;
+      if (msg?.role !== "user" && msg?.role !== "assistant") continue;
+      const c = msg.content;
+      const text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((p: any) => p?.type === "text").map((p: any) => p.text).join("") : "";
+      if (text.trim()) out.push({ role: msg.role, text: text.trim() });
+    }
+  } catch {
+    /* ignore */
+  }
+  return out.slice(-limit);
+}
+
 export function createNarayaPanelProvider(
   extensionUri: vscode.Uri,
   getBridgeConfig: () => { url: string; token: string } | undefined,
@@ -239,11 +264,11 @@ export function createNarayaPanelProvider(
           case "refreshSessions":
             post({ type: "sessions", list: listSessions() });
             break;
-          case "newSession":
-            void openTerminal();
+          case "openInTerminal":
+            void openTerminal(typeof msg.file === "string" ? ["--resume", msg.file] : undefined);
             break;
-          case "openSession":
-            if (typeof msg.file === "string") void openTerminal(["--resume", msg.file]);
+          case "loadSession":
+            if (typeof msg.file === "string") post({ type: "transcript", messages: readTranscript(msg.file) });
             break;
           case "signIn":
             void vscode.commands.executeCommand("naraya.signIn");
@@ -384,20 +409,20 @@ function html(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const IC = ${JSON.stringify(ic)};
   let sessions = [];
 
-  document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    document.getElementById('v-' + t.dataset.v).classList.add('active');
-    if (t.dataset.v === 'sessions') vscode.postMessage({ type: 'refreshSessions' });
-    if (t.dataset.v === 'account') vscode.postMessage({ type: 'refreshAccount' });
-  });
+  function switchTab(v) {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.v === v));
+    document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === 'v-' + v));
+    if (v === 'sessions') vscode.postMessage({ type: 'refreshSessions' });
+    if (v === 'account') vscode.postMessage({ type: 'refreshAccount' });
+  }
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchTab(t.dataset.v));
 
   // ---- Chat ----
   const log = document.getElementById('log');
   const input = document.getElementById('chatInput');
   let streaming = false, assistantBody = null, empty = true;
   const LOGO = ${JSON.stringify(String(logo))};
+  function resetChat() { empty = true; assistantBody = null; streaming = false; showWelcome(); }
 
   function showWelcome() {
     log.innerHTML = '<div class="welcome"><img src="'+LOGO+'"><div><strong>Chat with Naraya</strong></div>'
@@ -433,12 +458,12 @@ function html(webview: vscode.Webview, extensionUri: vscode.Uri): string {
       d.innerHTML = '<span class="ic">'+IC.sess+'</span><div style="min-width:0"><div class="t"></div><div class="m"></div></div>';
       d.querySelector('.t').textContent = s.title;
       d.querySelector('.m').textContent = proj + ' · ' + new Date(s.mtime).toLocaleString();
-      d.onclick = () => vscode.postMessage({ type: 'openSession', file: s.file });
+      d.onclick = () => { vscode.postMessage({ type: 'loadSession', file: s.file }); switchTab('chat'); };
       box.appendChild(d);
     }
   }
   document.getElementById('search').addEventListener('input', renderSessions);
-  document.getElementById('newSession').onclick = () => vscode.postMessage({ type: 'newSession' });
+  document.getElementById('newSession').onclick = () => { vscode.postMessage({ type: 'newChat' }); resetChat(); switchTab('chat'); };
 
   // ---- Account ----
   function num(n){ return (n||0).toLocaleString(); }
@@ -464,6 +489,15 @@ function html(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   window.addEventListener('message', e => {
     const m = e.data;
     if (m.type === 'account') renderAccount(m.result);
+    else if (m.type === 'transcript') {
+      empty = true; assistantBody = null; log.innerHTML = '';
+      for (const msg of (m.messages || [])) {
+        const who = msg.role === 'user' ? 'You' : 'Naraya';
+        const av = msg.role === 'user' ? '<span class="avatar av-u">U</span>' : '<img class="avatar" src="'+LOGO+'">';
+        addMsg(who, msg.role === 'user' ? 'user' : 'assistant', av).textContent = msg.text;
+      }
+      if (!(m.messages || []).length) resetChat();
+    }
     else if (m.type === 'sessions') { sessions = m.list || []; renderSessions(); }
     else if (m.type === 'chatDelta') { if (assistantBody) { assistantBody.textContent += m.delta; log.scrollTop = log.scrollHeight; } }
     else if (m.type === 'chatTool') { const t = document.createElement('div'); t.className='tool'; t.textContent = '⚙ ' + m.name; if (assistantBody) assistantBody.parentElement.insertBefore(t, assistantBody); log.scrollTop = log.scrollHeight; }
