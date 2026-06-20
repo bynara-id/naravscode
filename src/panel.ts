@@ -235,6 +235,7 @@ const ICONS = {
   account: `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="5.5" r="2.6"/><path d="M3 13.5a5 5 0 0 1 10 0"/></svg>`,
   plus: `<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M7.25 2h1.5v5.25H14v1.5H8.75V14h-1.5V8.75H2v-1.5h5.25z"/></svg>`,
   sess: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6h12"/></svg>`,
+  trash: `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M3 4.5h10M6 4.5V3h4v1.5M4.5 4.5l.5 8.5h6l.5-8.5"/></svg>`,
   send: `<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M1.7 2 14.5 8 1.7 14l1.8-6-1.8-6Zm2 2.6L4.4 8 3.7 11.4 11 8 3.7 4.6Z"/></svg>`,
 };
 
@@ -484,6 +485,16 @@ export function createNarayaPanelProvider(
           case "openSession":
             if (typeof msg.file === "string") openChat({ sessionFile: msg.file });
             break;
+          case "deleteSession":
+            if (typeof msg.file === "string") {
+              const ok = await vscode.window.showWarningMessage("Delete this session permanently?", { modal: true, detail: "This cannot be undone." }, "Delete");
+              if (ok === "Delete") {
+                try { require("node:fs").rmSync(msg.file, { force: true }); } catch { /* ignore */ }
+                const cli = msg.source === "cli";
+                view.webview.postMessage({ type: "sessions", list: cli ? listSessions() : listEditorSessions(), source: cli ? "cli" : "editor" });
+              }
+            }
+            break;
           case "signIn":
             void vscode.commands.executeCommand("naraya.signIn");
             break;
@@ -511,7 +522,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .top button:hover { opacity: 1; }
   #log { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
   .welcome { text-align: center; padding: 56px 16px; }
-  .welcome .wlogo { width: 56px; height: 56px; border-radius: 12px; margin-bottom: 12px; }
+  .welcome .wlogo { width: 168px; height: auto; margin-bottom: 14px; }
   .welcome h2 { margin: 4px 0; } .welcome p { opacity: .6; margin: 6px 0 18px; }
   .chip { display: inline-block; margin: 5px; padding: 7px 13px; border: 1px solid var(--vscode-panel-border); border-radius: 16px; cursor: pointer; font-size: 13px; }
   .chip:hover { background: var(--vscode-list-hoverBackground); }
@@ -543,7 +554,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .body th { background: var(--vscode-textBlockQuote-background, rgba(127,127,127,.08)); }
   /* composer (contained, Claude-style) */
   .barwrap { padding: 6px 14px 14px; position: relative; }
-  .composer { max-width: 880px; margin: 0 auto; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-input-background); padding: 8px 10px; }
+  .composer { max-width: 680px; margin: 0 auto; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-input-background); padding: 8px 10px; }
   .composer:focus-within { border-color: var(--vscode-focusBorder); }
   textarea { width: 100%; resize: none; background: transparent; color: var(--vscode-input-foreground); border: none; outline: none; font-family: inherit; font-size: inherit; max-height: 200px; padding: 2px; }
   .cfoot { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
@@ -552,7 +563,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); border-radius: 5px; padding: 2px 5px; font-size: 11px; }
   #send { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 8px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
   #send:hover { background: var(--vscode-button-hoverBackground); }
-  #mention { position: absolute; left: 50%; transform: translateX(-50%); width: min(880px, calc(100% - 28px)); bottom: 78px; max-height: 220px; overflow-y: auto; background: var(--vscode-editorWidget-background, var(--vscode-input-background)); border: 1px solid var(--vscode-panel-border); border-radius: 8px; display: none; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+  #mention { position: absolute; left: 50%; transform: translateX(-50%); width: min(680px, calc(100% - 28px)); bottom: 78px; max-height: 220px; overflow-y: auto; background: var(--vscode-editorWidget-background, var(--vscode-input-background)); border: 1px solid var(--vscode-panel-border); border-radius: 8px; display: none; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
   .mi { padding: 6px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
   .mi.sel, .mi:hover { background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-list-activeSelectionForeground); }
 </style></head><body>
@@ -600,6 +611,8 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
   .sess { display: flex; gap: 7px; padding: 4px 6px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; align-items: center; }
   .sess:hover { background: var(--vscode-list-hoverBackground); }
   .sess .ic { opacity: .45; flex: none; } .sess .t { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; } .sess .m { font-size: 10.5px; opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+  .sess .del { flex: none; width: auto; background: transparent; border: none; padding: 3px; opacity: 0; color: var(--vscode-foreground); cursor: pointer; }
+  .sess:hover .del { opacity: .55; } .sess .del:hover { opacity: 1; color: var(--vscode-errorForeground); }
   h3 { margin: 4px 0 6px; font-size: 11px; text-transform: uppercase; opacity: .65; }
   .row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--vscode-panel-border); } .row:last-child { border: 0; } .row .k { opacity: .7; } .row .v { font-weight: 600; text-align: right; }
 </style></head><body>
@@ -642,10 +655,11 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
     for (const s of items) {
       const d = document.createElement('div'); d.className='sess';
       const proj = s.project ? s.project.split(/[\\\\/]/).pop() : '';
-      d.innerHTML = '<span class="ic">'+IC.sess+'</span><div style="min-width:0"><div class="t"></div><div class="m"></div></div>';
+      d.innerHTML = '<span class="ic">'+IC.sess+'</span><div style="min-width:0;flex:1"><div class="t"></div><div class="m"></div></div><button class="del" title="Delete permanently">'+IC.trash+'</button>';
       d.querySelector('.t').textContent = s.title;
       d.querySelector('.m').textContent = proj + ' · ' + new Date(s.mtime).toLocaleString();
       d.onclick = () => vscode.postMessage({ type: 'openSession', file: s.file });
+      d.querySelector('.del').onclick = (ev) => { ev.stopPropagation(); vscode.postMessage({ type: 'deleteSession', file: s.file, source: src }); };
       box.appendChild(d);
     }
   }
