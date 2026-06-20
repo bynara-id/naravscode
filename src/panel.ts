@@ -178,6 +178,8 @@ export function openChatPanel(
     const panel = chatPanel;
     const post = (m: any) => void panel.webview.postMessage(m);
     const send = (o: object) => chatChild?.stdin?.write(`${JSON.stringify(o)}\n`);
+    let chatMode = "auto"; // ask | auto | plan
+    let chatEffort = ""; // low | medium | high — sent to the engine when it changes
 
     const ensureChild = async (): Promise<boolean> => {
       if (chatChild) return true;
@@ -232,6 +234,11 @@ export function openChatPanel(
           void (async () => {
             try {
               if (method === "confirm") {
+                if (chatMode === "auto") {
+                  send({ type: "extension_ui_response", id, confirmed: true }); // auto-approve
+                  post({ type: "chatTool", name: "auto-approved: " + String(ev.title ?? "action") });
+                  return;
+                }
                 const pick = await vscode.window.showWarningMessage(String(ev.message ?? ev.title ?? "Allow?"), { modal: true }, "Allow");
                 send({ type: "extension_ui_response", id, confirmed: pick === "Allow" });
               } else if (method === "select") {
@@ -265,7 +272,25 @@ export function openChatPanel(
 
     panel.webview.onDidReceiveMessage(async (msg: any) => {
       if (msg?.type === "chat" && typeof msg.text === "string" && msg.text.trim()) {
-        if (await ensureChild()) send({ id: `p${Date.now()}`, type: "prompt", message: msg.text.trim() });
+        if (typeof msg.mode === "string") chatMode = msg.mode;
+        if (!(await ensureChild())) return;
+        // Effort -> engine thinking level (only when it changes).
+        if (typeof msg.effort === "string" && msg.effort !== chatEffort) {
+          chatEffort = msg.effort;
+          send({ id: `t${Date.now()}`, type: "set_thinking_level", level: chatEffort });
+        }
+        let text = msg.text.trim();
+        if (chatMode === "plan") text = "Plan first — investigate and present a step-by-step plan, do NOT edit anything yet.\n\n" + text;
+        send({ id: `p${Date.now()}`, type: "prompt", message: text });
+      } else if (msg?.type === "listFiles") {
+        try {
+          const uris = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git,dist,out,build}/**", 3000);
+          const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+          post({ type: "files", list: uris.map((u) => vscode.workspace.asRelativePath(u, false)).filter(Boolean).sort() });
+          void root;
+        } catch {
+          post({ type: "files", list: [] });
+        }
       } else if (msg?.type === "newChat") {
         try {
           chatChild?.kill();
@@ -362,7 +387,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .top { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--vscode-panel-border); }
   .top img { width: 20px; height: 20px; } .top strong { flex: 1; }
   .top button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; font-size: 12px; }
-  #log { flex: 1; overflow-y: auto; padding: 20px; max-width: 820px; width: 100%; margin: 0 auto; }
+  #log { flex: 1; overflow-y: auto; padding: 14px 20px; }
   .welcome { text-align: center; padding: 48px 16px; }
   .welcome img { width: 48px; height: 48px; margin-bottom: 12px; }
   .welcome h2 { margin: 4px 0; } .welcome p { opacity: .65; margin: 6px 0 18px; }
@@ -374,23 +399,36 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .msg .col { min-width: 0; flex: 1; } .msg .who { font-size: 12px; opacity: .6; margin-bottom: 3px; }
   .msg .body { word-break: break-word; line-height: 1.6; }
   .msg.user .body { white-space: pre-wrap; }
-  .body p { margin: 6px 0; } .body h2,.body h3 { margin: 12px 0 4px; font-size: 1.05em; }
-  .body ul,.body ol { margin: 4px 0; padding-left: 22px; } .body li { margin: 2px 0; }
+  .body p { margin: 4px 0; } .body h2,.body h3 { margin: 10px 0 3px; font-size: 1.03em; }
+  .body ul,.body ol { margin: 3px 0; padding-left: 20px; } .body li { margin: 1px 0; }
   .body a { color: var(--vscode-textLink-foreground); }
   .body code { background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.16)); padding: 1px 5px; border-radius: 4px; font-family: var(--vscode-editor-font-family, monospace); font-size: .92em; }
   .body pre { background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.16)); padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
   .body pre code { background: none; padding: 0; }
   .think { opacity: .6; font-style: italic; }
   .tool { font-size: 12px; opacity: .6; font-style: italic; padding: 2px 0; }
-  .barwrap { border-top: 1px solid var(--vscode-panel-border); padding: 12px; }
-  .bar { display: flex; gap: 8px; max-width: 820px; margin: 0 auto; }
-  textarea { flex: 1; resize: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: inherit; outline: none; max-height: 160px; }
+  .barwrap { border-top: 1px solid var(--vscode-panel-border); padding: 10px 14px 12px; position: relative; }
+  .bar { display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; resize: none; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: inherit; outline: none; max-height: 200px; }
   textarea:focus { border-color: var(--vscode-focusBorder); }
-  .bar button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 8px; padding: 0 14px; cursor: pointer; }
+  .bar button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 8px; padding: 0 14px; height: 36px; cursor: pointer; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 12px; opacity: .85; }
+  .controls label { display: flex; gap: 5px; align-items: center; opacity: .7; }
+  select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); border-radius: 5px; padding: 3px 6px; font-size: 12px; }
+  #mention { position: absolute; left: 14px; right: 14px; bottom: 64px; max-height: 220px; overflow-y: auto; background: var(--vscode-editorWidget-background, var(--vscode-input-background)); border: 1px solid var(--vscode-panel-border); border-radius: 8px; display: none; z-index: 5; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+  .mi { padding: 6px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+  .mi.sel, .mi:hover { background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-list-activeSelectionForeground); }
 </style></head><body>
   <div class="top"><img src="${logo}"><strong>Naraya AI</strong><button id="new">+ New chat</button></div>
   <div id="log"></div>
-  <div class="barwrap"><div class="bar"><textarea id="in" rows="1" placeholder="Message Naraya…  (Enter to send, Shift+Enter for newline)"></textarea><button id="send">${ICONS.send}</button></div></div>
+  <div class="barwrap">
+    <div id="mention"></div>
+    <div class="bar"><textarea id="in" rows="1" placeholder="Message Naraya…  (@ to mention a file · Enter to send)"></textarea><button id="send">${ICONS.send}</button></div>
+    <div class="controls">
+      <label>Mode <select id="mode"><option value="ask">Ask</option><option value="auto" selected>Auto</option><option value="plan">Plan</option></select></label>
+      <label>Effort <select id="effort"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
+    </div>
+  </div>
 <script nonce="${n}">window.__naraya = { logo: ${JSON.stringify(String(logo))} };</script>
 <script nonce="${n}" src="${chatJs}"></script>
 </body></html>`;
