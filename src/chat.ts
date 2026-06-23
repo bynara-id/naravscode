@@ -1,7 +1,7 @@
 import { StringDecoder } from "node:string_decoder";
 import * as vscode from "vscode";
 import { toErrorMessage } from "./bridge/utils.ts";
-import { createPiEnvironment, createPiRpcArgs, ensurePiBinary, spawnNaraya } from "./pi.ts";
+import { createPiEnvironment, createPiRpcArgs, ensurePiBinary, spawnByNara } from "./pi.ts";
 import { createNewTerminal } from "./terminal.ts";
 
 export function createChatHandler(options: {
@@ -11,15 +11,13 @@ export function createChatHandler(options: {
   return async (request, _context, stream, token) => {
     const message = request.prompt.trim();
     if (!message) {
-      stream.markdown("Please provide a message to send to Naraya.");
+      stream.markdown("Please provide a message to send to ByNara.");
       return;
     }
 
     const piPath = await ensurePiBinary();
     if (!piPath) {
-      stream.markdown(
-        "Naraya CLI is not installed. Install it with `npm i -g @naraya/cli`.",
-      );
+      stream.markdown("ByNara CLI is not installed. Install it with `npm i -g bynara-cli`.");
       return;
     }
 
@@ -32,7 +30,7 @@ export function createChatHandler(options: {
         extensionUri: options.extensionUri,
         bridgeConfig: options.getBridgeConfig(),
       });
-      if (!result.hadOutput) stream.markdown("Naraya did not return any text.");
+      if (!result.hadOutput) stream.markdown("ByNara did not return any text.");
     } catch (error) {
       const terminal = await createNewTerminal({
         extensionUri: options.extensionUri,
@@ -41,7 +39,7 @@ export function createChatHandler(options: {
       });
       terminal?.show();
       stream.markdown(
-        `Naraya RPC failed and fell back to the terminal.\n\nError: ${escapeMarkdownInline(toErrorMessage(error))}`,
+        `ByNara RPC failed and fell back to the terminal.\n\nError: ${escapeMarkdownInline(toErrorMessage(error))}`,
       );
     }
   };
@@ -56,7 +54,7 @@ async function runPiRpcPrompt(options: {
   bridgeConfig?: { url: string; token: string };
 }): Promise<{ hadOutput: boolean }> {
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const child = spawnNaraya(options.piPath, createPiRpcArgs(options.extensionUri), {
+  const child = spawnByNara(options.piPath, createPiRpcArgs(options.extensionUri), {
     cwd,
     env: {
       ...process.env,
@@ -89,13 +87,21 @@ async function runPiRpcPrompt(options: {
   // Surface the engine's gate prompts (extension_ui_request) as native VS Code
   // dialogs and write the answer back to the engine's stdin. Async — the line
   // handler fires this without awaiting; the reply is sent when the user picks.
-  const respondToUiRequest = async (id: string, method: string | undefined, event: Record<string, unknown>) => {
-    const title = typeof event.title === "string" ? event.title : "Naraya";
+  const respondToUiRequest = async (
+    id: string,
+    method: string | undefined,
+    event: Record<string, unknown>,
+  ) => {
+    const title = typeof event.title === "string" ? event.title : "ByNara";
     try {
       if (method === "confirm") {
         const message = typeof event.message === "string" ? event.message : title;
         const detail = message !== title ? title : undefined;
-        const pick = await vscode.window.showWarningMessage(message, { modal: true, detail }, "Allow");
+        const pick = await vscode.window.showWarningMessage(
+          message,
+          { modal: true, detail },
+          "Allow",
+        );
         sendCommand({ type: "extension_ui_response", id, confirmed: pick === "Allow" });
         return;
       }
@@ -162,7 +168,8 @@ async function runPiRpcPrompt(options: {
           if (!id) return;
           // Fire-and-forget notifications carry no response.
           if (method === "notify") {
-            if (typeof event.message === "string") void vscode.window.showInformationMessage(event.message);
+            if (typeof event.message === "string")
+              void vscode.window.showInformationMessage(event.message);
             return;
           }
           if (["confirm", "select", "input"].includes(method ?? "")) {
@@ -187,7 +194,7 @@ async function runPiRpcPrompt(options: {
           return;
         }
         if (event.type === "response" && event.command === "prompt" && event.success === false) {
-          finish(resolve, reject, new Error(String(event.error ?? "Naraya RPC prompt failed")));
+          finish(resolve, reject, new Error(String(event.error ?? "ByNara RPC prompt failed")));
           child.kill();
           return;
         }
@@ -209,14 +216,14 @@ async function runPiRpcPrompt(options: {
       stdoutBuffer += decoder.end();
       if (resolved) return;
       if (options.token.isCancellationRequested) {
-        finish(resolve, reject, new Error("Naraya RPC request cancelled."));
+        finish(resolve, reject, new Error("ByNara RPC request cancelled."));
         return;
       }
       if (code === 0 || signal === "SIGTERM") {
         finish(resolve, reject);
         return;
       }
-      const message = stderrBuffer.trim() || `Naraya RPC exited with code ${code ?? "unknown"}.`;
+      const message = stderrBuffer.trim() || `ByNara RPC exited with code ${code ?? "unknown"}.`;
       finish(resolve, reject, new Error(message));
     });
 

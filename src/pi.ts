@@ -15,16 +15,18 @@ import {
 let piExistsCache: boolean | undefined;
 
 export function findPiBinary(): string {
-  const config = vscode.workspace.getConfiguration("naraya");
+  const config = vscode.workspace.getConfiguration("bynara");
   return resolvePiBinary({
     customPath: config.get<string>("path") || undefined,
     workspaceDirs: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
   });
 }
 
-export async function ensurePiBinary(): Promise<string | undefined> {
+// Synchronous, UI-free existence check (cached). Use this on hot paths like the
+// chat send handler where a blocking modal would otherwise hang the "Thinking…"
+// spinner while the popup waits for a click.
+export function piBinaryExists(): boolean {
   const piPath = findPiBinary();
-
   if (piExistsCache === undefined) {
     try {
       accessSync(piPath, process.platform === "win32" ? constants.F_OK : constants.X_OK);
@@ -33,17 +35,22 @@ export async function ensurePiBinary(): Promise<string | undefined> {
       piExistsCache = false;
     }
   }
+  return piExistsCache;
+}
 
-  if (piExistsCache) return piPath;
+export async function ensurePiBinary(): Promise<string | undefined> {
+  const piPath = findPiBinary();
+
+  if (piBinaryExists()) return piPath;
 
   const managers = PI_PACKAGE_MANAGERS.filter((manager) => manager !== "yarn");
   const action = await vscode.window.showErrorMessage(
-    "Naraya CLI not found. Install it globally?",
+    "ByNara CLI not found. Install it globally?",
     ...managers,
   );
   if (action) {
     piExistsCache = undefined;
-    const terminal = vscode.window.createTerminal({ name: "Install Naraya CLI" });
+    const terminal = vscode.window.createTerminal({ name: "Install ByNara CLI" });
     terminal.show();
     terminal.sendText(createPiGlobalInstallCommand(action));
   }
@@ -62,15 +69,17 @@ export async function upgradePiBinary(): Promise<void> {
   }
   if (!manager) {
     manager = (await vscode.window.showQuickPick([...PI_PACKAGE_MANAGERS], {
-      placeHolder: `Could not infer the package manager for ${piPath}. Choose one to upgrade Naraya globally.`,
+      placeHolder: `Could not infer the package manager for ${piPath}. Choose one to upgrade ByNara globally.`,
     })) as PiPackageManager | undefined;
   }
   if (!manager) return;
 
-  const terminal = vscode.window.createTerminal({ name: "Upgrade Naraya CLI" });
+  const terminal = vscode.window.createTerminal({ name: "Upgrade ByNara CLI" });
   terminal.show();
   terminal.sendText(createPiUpgradeCommand(manager, piPath));
-  void vscode.window.showInformationMessage(`Upgrading Naraya with ${manager}. Found naraya at: ${piPath}`);
+  void vscode.window.showInformationMessage(
+    `Upgrading ByNara with ${manager}. Found naracli at: ${piPath}`,
+  );
 }
 
 export function createPiShellArgs(
@@ -82,8 +91,11 @@ export function createPiShellArgs(
   return args;
 }
 
-export function createPiRpcArgs(extensionUri: vscode.Uri): string[] {
-  return ["--mode", "rpc", "--no-session", ...createPiBaseArgs(extensionUri)];
+export function createPiRpcArgs(extensionUri: vscode.Uri, sessionFile?: string): string[] {
+  // With a session file the engine persists + resumes full conversation context
+  // (so reopening a chat keeps the agent's memory). Without one it stays stateless.
+  const sess = sessionFile ? ["--session", sessionFile] : ["--no-session"];
+  return ["--mode", "rpc", ...sess, ...createPiBaseArgs(extensionUri)];
 }
 
 export function createPiEnvironment(
@@ -96,11 +108,11 @@ export function createPiEnvironment(
   };
 }
 
-// Spawn the resolved naraya binary safely across platforms. On Windows the
-// global npm shim is `naraya.cmd`, and modern Node refuses to spawn .cmd/.bat
+// Spawn the resolved naracli binary safely across platforms. On Windows the
+// global npm shim is `naracli.cmd`, and modern Node refuses to spawn .cmd/.bat
 // without a shell (CVE-2024-27980) — so run it through the shell with manually
 // quoted args (shell:true does not quote for us). Elsewhere, spawn directly.
-export function spawnNaraya(
+export function spawnByNara(
   bin: string,
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: any },

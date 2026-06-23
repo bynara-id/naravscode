@@ -1,4 +1,4 @@
-export const TERMINAL_TITLE = "Naraya";
+export const TERMINAL_TITLE = "ByNara";
 
 export const BRIDGE_EXTENSION_PATH = "bridge/pi-vscode-bridge.js";
 

@@ -4,7 +4,7 @@ import { registerAuth } from "./auth.ts";
 import { createBridge } from "./bridge/server.ts";
 import { createChatHandler } from "./chat.ts";
 import { TERMINAL_TITLE } from "./constants.ts";
-import { createNarayaPanelProvider, openChatPanel } from "./panel.ts";
+import { createByNaraPanelProvider, openChatPanel } from "./panel.ts";
 import { createPiEnvironment, createPiShellArgs, findPiBinary, upgradePiBinary } from "./pi.ts";
 import { createSessionTracker } from "./sessions.ts";
 import { buildOpenWithFileContext, createNewTerminal } from "./terminal.ts";
@@ -16,7 +16,7 @@ let bridgeDispose: (() => Promise<void>) | undefined;
 export async function activate(context: vscode.ExtensionContext) {
   extensionUri = context.extensionUri;
 
-  // Sign in with Naraya (vscode:// callback) — registers naraya.signIn + the URI
+  // Sign in with ByNara (vscode:// callback) — registers bynara.signIn + the URI
   // handler. Gateway-side /connect/cli?mode=vscode redirect is Plan 02 Task 3.
   registerAuth(context);
 
@@ -52,7 +52,7 @@ export async function activate(context: vscode.ExtensionContext) {
   };
 
   const participant = vscode.chat.createChatParticipant(
-    "naraya.chat",
+    "bynara.chat",
     createChatHandler({
       extensionUri,
       getBridgeConfig: () => bridgeConfig,
@@ -65,24 +65,24 @@ export async function activate(context: vscode.ExtensionContext) {
   participant.iconPath = logoIcon;
 
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.text = "$(sparkle) Naraya";
-  statusBarItem.tooltip = "Open Naraya Terminal";
-  statusBarItem.command = "naraya.open";
+  statusBarItem.text = "$(sparkle) ByNara";
+  statusBarItem.tooltip = "Open ByNara Terminal";
+  statusBarItem.command = "bynara.open";
   statusBarItem.show();
 
   context.subscriptions.push(
     participant,
     statusBarItem,
     vscode.window.onDidCloseTerminal((terminal) => sessions.onClose(terminal)),
-    vscode.commands.registerCommand("naraya.open", async () => {
+    vscode.commands.registerCommand("bynara.open", async () => {
       const terminal = await openTerminal();
       terminal?.show();
     }),
-    vscode.commands.registerCommand("naraya.openWithFile", async () => {
+    vscode.commands.registerCommand("bynara.openWithFile", async () => {
       const terminal = await openTerminal(undefined, buildOpenWithFileContext());
       terminal?.show();
     }),
-    vscode.commands.registerCommand("naraya.sendSelection", async () => {
+    vscode.commands.registerCommand("bynara.sendSelection", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) return;
       const selection = editor.document.getText(editor.selection);
@@ -90,23 +90,25 @@ export async function activate(context: vscode.ExtensionContext) {
       const terminal = await openTerminal([selection]);
       terminal?.show();
     }),
-    vscode.commands.registerCommand("naraya.openInNewWindow", async () => {
+    vscode.commands.registerCommand("bynara.openInNewWindow", async () => {
       const terminal = await openTerminal();
       if (!terminal) return;
       terminal.show();
       await vscode.commands.executeCommand("workbench.action.moveEditorToNewWindow");
     }),
-    vscode.commands.registerCommand("naraya.upgrade", upgradePiBinary),
-    // Naraya chat opens as an editor-area panel (Claude-style tab); the sidebar
+    vscode.commands.registerCommand("bynara.upgrade", upgradePiBinary),
+    // ByNara chat opens as an editor-area panel (Claude-style tab); the sidebar
     // is the launcher (Sessions + Account + New chat).
-    vscode.commands.registerCommand("naraya.openChat", () =>
+    vscode.commands.registerCommand("bynara.openChat", () =>
       openChatPanel(extensionUri, () => bridgeConfig, { fresh: true }),
     ),
     vscode.window.registerWebviewViewProvider(
-      "naraya.home",
-      createNarayaPanelProvider(extensionUri, (opts) => openChatPanel(extensionUri, () => bridgeConfig, opts)),
+      "bynara.home",
+      createByNaraPanelProvider(extensionUri, (opts) =>
+        openChatPanel(extensionUri, () => bridgeConfig, opts),
+      ),
     ),
-    vscode.window.registerTerminalProfileProvider("naraya.terminal-profile", {
+    vscode.window.registerTerminalProfileProvider("bynara.terminal-profile", {
       provideTerminalProfile() {
         const terminalId = randomUUID();
         const baseEnv = createPiEnvironment(bridgeConfig);

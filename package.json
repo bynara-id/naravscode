@@ -1,18 +1,22 @@
 {
-  "name": "naraya-vscode",
-  "displayName": "Naraya AI",
-  "version": "0.8.0",
-  "description": "VS Code extension for the Naraya AI coding agent",
+  "name": "bynara-vscode",
+  "displayName": "ByNara AI",
+  "version": "0.58.0",
+  "description": "VS Code extension for the ByNara AI coding agent",
   "categories": [
     "AI",
     "Chat"
   ],
+  "homepage": "https://github.com/bynara-id/naravscode#readme",
+  "bugs": {
+    "url": "https://github.com/bynara-id/naravscode/issues"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/naraya-ai/naraya-vscode"
+    "url": "https://github.com/bynara-id/naravscode.git"
   },
-  "publisher": "naraya",
+  "publisher": "bynara-id",
   "type": "module",
   "main": "./dist/extension.cjs",
   "scripts": {
@@ -39,8 +43,8 @@
   },
   "contributes": {
     "icons": {
-      "naraya-logo": {
-        "description": "Naraya logo icon",
+      "bynara-logo": {
+        "description": "ByNara logo icon",
         "default": {
           "fontPath": "assets/fonts/pi-icons.woff2",
           "fontCharacter": "\\F101"
@@ -49,65 +53,65 @@
     },
     "chatParticipants": [
       {
-        "id": "naraya.chat",
-        "fullName": "Naraya AI",
-        "name": "naraya",
-        "description": "Chat with the Naraya AI coding agent",
+        "id": "bynara.chat",
+        "fullName": "ByNara AI",
+        "name": "bynara",
+        "description": "Chat with the ByNara AI coding agent",
         "isSticky": true
       }
     ],
     "commands": [
       {
-        "command": "naraya.open",
-        "title": "Naraya: Open",
+        "command": "bynara.open",
+        "title": "ByNara: Open",
         "icon": {
           "light": "assets/logo-light.svg",
           "dark": "assets/logo.svg"
         }
       },
       {
-        "command": "naraya.openWithFile",
-        "title": "Naraya: Open with File",
+        "command": "bynara.openWithFile",
+        "title": "ByNara: Open with File",
         "icon": {
           "light": "assets/logo-light.svg",
           "dark": "assets/logo.svg"
         }
       },
       {
-        "command": "naraya.sendSelection",
-        "title": "Naraya: Send Selection"
+        "command": "bynara.sendSelection",
+        "title": "ByNara: Send Selection"
       },
       {
-        "command": "naraya.upgrade",
-        "title": "Naraya: Upgrade Naraya CLI and Packages"
+        "command": "bynara.upgrade",
+        "title": "ByNara: Upgrade ByNara CLI and Packages"
       },
       {
-        "command": "naraya.openInNewWindow",
-        "title": "Naraya: Open in New Window",
+        "command": "bynara.openInNewWindow",
+        "title": "ByNara: Open in New Window",
         "icon": {
           "light": "assets/logo-light.svg",
           "dark": "assets/logo.svg"
         }
       },
       {
-        "command": "naraya.signIn",
-        "title": "Naraya: Sign in with Naraya"
+        "command": "bynara.signIn",
+        "title": "ByNara: Sign in with ByNara"
       },
       {
-        "command": "naraya.openChat",
-        "title": "Naraya: Open Chat"
+        "command": "bynara.openChat",
+        "title": "ByNara: Open Chat"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "naraya.openWithFile",
+          "command": "bynara.openWithFile",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
-          "command": "naraya.openWithFile",
+          "command": "bynara.openWithFile",
           "group": "navigation"
         }
       ]
@@ -115,42 +119,42 @@
     "terminal": {
       "profiles": [
         {
-          "id": "naraya.terminal-profile",
-          "title": "Naraya",
-          "icon": "naraya-logo"
+          "id": "bynara.terminal-profile",
+          "title": "ByNara",
+          "icon": "bynara-logo"
         }
       ]
     },
     "configuration": {
-      "title": "Naraya",
+      "title": "ByNara",
       "properties": {
-        "naraya.path": {
+        "bynara.path": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the naraya binary. Leave empty for auto-detection."
+          "description": "Absolute path to the naracli binary. Leave empty for auto-detection."
         }
       }
     },
     "keybindings": [
       {
-        "command": "naraya.open",
+        "command": "bynara.open",
         "key": "ctrl+alt+3"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "naraya",
-          "title": "Naraya",
+          "id": "bynara",
+          "title": "ByNara",
           "icon": "assets/logo.svg"
         }
       ]
     },
     "views": {
-      "naraya": [
+      "bynara": [
         {
-          "id": "naraya.home",
-          "name": "Naraya",
+          "id": "bynara.home",
+          "name": "ByNara",
           "type": "webview"
         }
       ]

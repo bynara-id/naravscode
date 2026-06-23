@@ -1,4 +1,5 @@
-export const PI_PACKAGE_NAME = "@naraya/cli";
+// npm package name (for install/upgrade). The CLI binary it installs is `naracli`.
+export const PI_PACKAGE_NAME = "bynara-cli";
 
 export type PiPackageManager = "bun" | "npm" | "pnpm" | "yarn";
 

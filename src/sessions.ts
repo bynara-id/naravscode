@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { TERMINAL_TITLE } from "./constants.ts";
 import { createNewTerminal } from "./terminal.ts";
 
-const SESSIONS_KEY = "naraya.terminalSessions";
+const SESSIONS_KEY = "bynara.terminalSessions";
 
 type TerminalSessionMap = Record<string, string>;
 

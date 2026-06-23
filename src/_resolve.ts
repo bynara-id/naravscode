@@ -31,7 +31,7 @@ export function resolvePiBinary(opts: ResolveOptions = {}): string {
 
   const isWin = platform === "win32";
   // On Windows, npm/pnpm create .cmd shims; also check .exe and .ps1
-  const names = isWin ? WIN_EXECUTABLE_EXTENSIONS.map((ext) => `naraya${ext}`) : ["naraya"];
+  const names = isWin ? WIN_EXECUTABLE_EXTENSIONS.map((ext) => `naracli${ext}`) : ["naracli"];
   // Windows lacks Unix-style execute permission; just check the file exists
   const accessFlag = isWin ? constants.F_OK : constants.X_OK;
 
@@ -53,7 +53,7 @@ export function resolvePiBinary(opts: ResolveOptions = {}): string {
   // Then well-known global paths
   const globalCandidates = isWin
     ? windowsGlobalDirs(opts).flatMap((d) => names.map((n) => join(d, n)))
-    : [`${home}/.bun/bin/naraya`, `${home}/.local/bin/naraya`, `${home}/.npm-global/bin/naraya`];
+    : [`${home}/.bun/bin/naracli`, `${home}/.local/bin/naracli`, `${home}/.npm-global/bin/naracli`];
 
   const candidates = [...workspaceCandidates, ...globalCandidates];
   for (const c of candidates) {
@@ -76,7 +76,7 @@ export function resolvePiBinary(opts: ResolveOptions = {}): string {
     }
   }
 
-  return "naraya";
+  return "naracli";
 }
 
 function windowsGlobalDirs(opts: ResolveOptions): string[] {
