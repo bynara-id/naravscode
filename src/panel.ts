@@ -441,12 +441,9 @@ const ICONS = {
 
 // ============================ Editor-area chat panel ========================
 
-let chatPanel: vscode.WebviewPanel | undefined;
-let chatChild: ChildProcess | undefined;
 let chatOut: vscode.OutputChannel | undefined;
-let sessId = nonce(); // current editor-session id
-let sessMsgs: Array<{ role: string; text: string }> = [];
-let asstAcc = ""; // assistant text accumulated for the current turn
+const chatPanels = new Set<vscode.WebviewPanel>(); // every open chat tab
+let lastChatPanel: vscode.WebviewPanel | undefined; // most-recent, for a generic "Open"
 
 export function openChatPanel(
   extensionUri: vscode.Uri,
@@ -455,10 +452,22 @@ export function openChatPanel(
 ): void {
   if (!chatOut) chatOut = vscode.window.createOutputChannel("ByNara");
 
-  if (chatPanel) {
-    chatPanel.reveal(vscode.ViewColumn.Active);
-  } else {
-    chatPanel = vscode.window.createWebviewPanel(
+  // A generic "Open" (no fresh/session intent) focuses the most recent tab
+  // instead of spawning yet another one. "New chat" and opening a session always
+  // create a fresh, isolated tab so existing chats stay open (multi-tab).
+  if (!opts.fresh && !opts.sessionFile && lastChatPanel) {
+    lastChatPanel.reveal(vscode.ViewColumn.Active);
+    return;
+  }
+
+  // Per-tab state — isolated so multiple chats run side by side.
+  let child: ChildProcess | undefined;
+  let sessId = nonce();
+  let sessMsgs: Array<{ role: string; text: string }> = [];
+  let asstAcc = "";
+
+  {
+    const panel = vscode.window.createWebviewPanel(
       "bynara.chat",
       "ByNara",
       vscode.ViewColumn.Active,
@@ -468,19 +477,23 @@ export function openChatPanel(
         localResourceRoots: [extensionUri],
       },
     );
-    chatPanel.iconPath = vscode.Uri.joinPath(extensionUri, "assets", "logo.svg");
-    chatPanel.webview.html = chatHtml(chatPanel.webview, extensionUri);
+    chatPanels.add(panel);
+    lastChatPanel = panel;
+    panel.onDidChangeViewState(() => {
+      if (panel.active) lastChatPanel = panel;
+    });
+    panel.iconPath = vscode.Uri.joinPath(extensionUri, "assets", "logo.svg");
+    panel.webview.html = chatHtml(panel.webview, extensionUri);
 
-    const panel = chatPanel;
     const post = (m: any) => void panel.webview.postMessage(m);
-    const send = (o: object) => chatChild?.stdin?.write(`${JSON.stringify(o)}\n`);
+    const send = (o: object) => child?.stdin?.write(`${JSON.stringify(o)}\n`);
     let chatMode = "auto"; // ask | auto | plan
     let chatEffort = ""; // low | medium | high — sent to the engine when it changes
     let chatModel = ""; // model id — sent to the engine (set_model) when it changes
     const uiPending = new Map<string, string>(); // extension_ui_request id -> method, awaiting inline answer
 
     const ensureChild = async (): Promise<boolean> => {
-      if (chatChild) return true;
+      if (child) return true;
       // Non-blocking: if the CLI is missing, surface the error INSIDE the chat
       // immediately (so it doesn't hang on "Thinking…") and fire the install
       // prompt without awaiting it — a blocking modal here would stall the spinner
@@ -506,17 +519,17 @@ export function openChatPanel(
       }
       const args = createPiRpcArgs(extensionUri, engineSession);
       chatOut!.appendLine(`[chat] spawn ${bynara} ${args.join(" ")} (cwd=${cwd ?? "-"})`);
-      chatChild = spawnByNara(bynara, args, {
+      child = spawnByNara(bynara, args, {
         cwd,
         env: { ...process.env, ...createPiEnvironment(getBridgeConfig()) },
         stdio: ["pipe", "pipe", "pipe"],
       });
-      chatChild.stderr?.on("data", (d) =>
+      child.stderr?.on("data", (d) =>
         chatOut!.appendLine(`[stderr] ${d.toString().trimEnd()}`),
       );
       const decoder = new StringDecoder("utf8");
       let buf = "";
-      chatChild.stdout?.on("data", (chunk) => {
+      child.stdout?.on("data", (chunk) => {
         buf += decoder.write(chunk);
         let nl: number;
         while ((nl = buf.indexOf("\n")) !== -1) {
@@ -532,14 +545,14 @@ export function openChatPanel(
           handle(ev);
         }
       });
-      chatChild.on("close", (code) => {
+      child.on("close", (code) => {
         chatOut!.appendLine(`[chat] closed (${code})`);
-        chatChild = undefined;
+        child = undefined;
         post({ type: "chatDone" });
       });
-      chatChild.on("error", (e) => {
+      child.on("error", (e) => {
         chatOut!.appendLine(`[chat] error ${String(e?.message ?? e)}`);
-        chatChild = undefined;
+        child = undefined;
         post({ type: "chatError", error: String(e?.message ?? e) });
       });
       return true;
@@ -725,17 +738,17 @@ export function openChatPanel(
         });
       } else if (msg?.type === "followup" && typeof msg.text === "string" && msg.text.trim()) {
         // Queue a steering message while the agent is still running.
-        if (chatChild) {
+        if (child) {
           sessMsgs.push({ role: "user", text: msg.text.trim() });
           send({ id: `f${Date.now()}`, type: "follow_up", message: msg.text.trim() });
         }
       } else if (msg?.type === "signOut") {
         try {
-          chatChild?.kill();
+          child?.kill();
         } catch {
           /* ignore */
         }
-        chatChild = undefined;
+        child = undefined;
         await vscode.commands.executeCommand("bynara.signOut"); // clears secret + models.json
         post({ type: "chatError", error: "Signed out. Sign in again to continue." });
       } else if (msg?.type === "listFiles") {
@@ -819,7 +832,7 @@ export function openChatPanel(
         writeMcp(s);
         post({ type: "mcp", list: mcpEntries() });
       } else if (msg?.type === "compact") {
-        if (chatChild) {
+        if (child) {
           send({ id: `c${Date.now()}`, type: "compact" });
           post({ type: "chatTool", name: "compacting context…" });
         }
@@ -884,72 +897,64 @@ export function openChatPanel(
           /* cancelled */
         }
       } else if (msg?.type === "newChat") {
-        try {
-          chatChild?.kill();
-        } catch {
-          /* ignore */
-        }
-        chatChild = undefined;
-        sessId = nonce();
-        sessMsgs = [];
-        asstAcc = "";
-        chatModel = "";
-        panel.title = "ByNara";
+        // Multi-tab: open a fresh, isolated chat tab instead of wiping this one.
+        openChatPanel(extensionUri, getBridgeConfig, { fresh: true });
       } else if (msg?.type === "stop") {
         // Graceful: abort the current run but keep the session/child alive.
-        if (chatChild) send({ id: `a${Date.now()}`, type: "abort" });
+        if (child) send({ id: `a${Date.now()}`, type: "abort" });
       }
     });
 
     panel.onDidDispose(() => {
       try {
-        chatChild?.kill();
+        child?.kill();
       } catch {
         /* ignore */
       }
-      chatChild = undefined;
-      chatPanel = undefined;
+      child = undefined;
+      chatPanels.delete(panel);
+      if (lastChatPanel === panel) lastChatPanel = undefined;
     });
-  }
 
-  // Fresh chat or load a session transcript into the (possibly reused) panel.
-  if (opts.fresh) {
+    // Load fresh chat or a session transcript into this new tab.
+    if (opts.fresh) {
     try {
-      chatChild?.kill();
+      child?.kill();
     } catch {
       /* ignore */
     }
-    chatChild = undefined;
+    child = undefined;
     sessId = nonce();
     sessMsgs = [];
     asstAcc = "";
-    chatPanel.title = "ByNara";
-    void chatPanel.webview.postMessage({ type: "reset" });
+    panel.title = "ByNara";
+    void panel.webview.postMessage({ type: "reset" });
   } else if (opts.sessionFile) {
     try {
-      chatChild?.kill();
+      child?.kill();
     } catch {
       /* ignore */
     }
-    chatChild = undefined;
+    child = undefined;
     asstAcc = "";
     if (opts.sessionFile.endsWith(".json")) {
       // Editor session — resume it (new turns append to the same file).
       sessId = opts.sessionFile.replace(/^.*[\\/]/, "").replace(/\.json$/, "");
       sessMsgs = readEditorSession(opts.sessionFile);
-      void chatPanel.webview.postMessage({ type: "transcript", messages: sessMsgs });
+      void panel.webview.postMessage({ type: "transcript", messages: sessMsgs });
     } else {
       // CLI session — read-only view; new turns start a fresh editor session.
       sessId = nonce();
       sessMsgs = [];
       const tx = readTranscript(opts.sessionFile);
-      void chatPanel.webview.postMessage({ type: "transcript", messages: tx });
+      void panel.webview.postMessage({ type: "transcript", messages: tx });
       const first = tx.find((m) => m.role === "user");
-      chatPanel.title = first ? deriveTitle(first.text) : "ByNara";
+      panel.title = first ? deriveTitle(first.text) : "ByNara";
       return;
     }
     const firstU = sessMsgs.find((m) => m.role === "user");
-    chatPanel.title = firstU ? deriveTitle(firstU.text) : "ByNara";
+    panel.title = firstU ? deriveTitle(firstU.text) : "ByNara";
+    }
   }
 }
 
@@ -1112,6 +1117,10 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .composer { max-width: 680px; margin: 0 auto; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 12px; background: var(--vscode-input-background); padding: 8px 10px; transition: border-color .12s; }
   .composer:focus-within { border-color: var(--nry); box-shadow: 0 0 0 1px var(--nry); }
   textarea { width: 100%; resize: none; background: transparent; color: var(--vscode-input-foreground); border: none; outline: none; font-family: inherit; font-size: inherit; max-height: 200px; padding: 2px; }
+  #workstatus { display: none; align-items: center; gap: 8px; width: fit-content; margin: 0 auto 6px; padding: 4px 12px; border-radius: 999px; background: var(--vscode-badge-background, rgba(45,123,255,.16)); color: var(--vscode-badge-foreground, #4da3ff); font-size: 12px; font-weight: 500; }
+  #workstatus.on { display: flex; }
+  #workstatus .wdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: wpulse 1s ease-in-out infinite; }
+  @keyframes wpulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
   .chips { display: none; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
   .chip-img { position: relative; display: inline-block; }
   .chip-img img { height: 46px; width: auto; border-radius: 6px; border: 1px solid var(--vscode-panel-border); display: block; }
@@ -1298,6 +1307,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
       <div class="mm-effort"><span class="lico">${ICONS.caveman}</span><span>Caveman</span><span class="lvl" id="cavemanval">(Off)</span><div class="dotslider" id="cavemanslider"></div></div>
       <div class="mm-toggle" id="sptoggle"><span class="lico">${ICONS.zap}</span><span class="grow2">Superpowers</span><span class="sw"></span></div>
     </div>
+    <div id="workstatus"><span class="wdot"></span><span class="wlabel">Thinking…</span></div>
     <div class="composer">
       <div id="chips" class="chips"></div>
       <textarea id="in" rows="1" placeholder="Message ByNara…  (@ mention a file · paste an image)"></textarea>

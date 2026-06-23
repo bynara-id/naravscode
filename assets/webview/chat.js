@@ -18,11 +18,23 @@
   const askTools = {}; // ask_user tool-call ids, suppressed in favor of the inline question card
   const todoIds = {}; // todo tool-call ids, rendered as one live checklist instead of stacked boxes
   let todoPanel = null;
+  let doneTimer = null; // grace timer before treating the turn as fully idle
+  const workStatus = document.getElementById("workstatus");
+  const workLabel = workStatus && workStatus.querySelector(".wlabel");
   function setStreaming(on) {
     streaming = on;
     sendBtn.classList.toggle("stopping", on);
     sendBtn.innerHTML = on ? STOP_SVG : SEND_SVG;
     sendBtn.title = on ? "Stop" : "Send";
+    // Persistent rotating "working" pill above the composer — visible the WHOLE
+    // time the agent is busy (not just the brief pre-output gap).
+    if (workStatus) workStatus.classList.toggle("on", on);
+    if (on) {
+      if (workLabel) workLabel.textContent = pickWord() + "…";
+      startThinkTicker();
+    } else {
+      stopThinkTicker();
+    }
   }
 
   function esc(s) {
@@ -167,7 +179,37 @@
     log.appendChild(b);
     return b;
   }
+  // Rotating "working" verbs (Claude-style) shown while the agent is busy.
+  const WORK_WORDS = [
+    "Thinking", "Pondering", "Cogitating", "Brewing", "Conjuring", "Crunching",
+    "Synthesizing", "Chunking", "Wrangling", "Percolating", "Noodling", "Computing",
+    "Untangling", "Finagling", "Tinkering", "Reticulating", "Vibing", "Scheming",
+    "Assembling", "Distilling", "Completing", "Plotting", "Marinating", "Whirring",
+  ];
+  let thinkTimer = null;
+  function pickWord() {
+    return WORK_WORDS[Math.floor(Math.random() * WORK_WORDS.length)];
+  }
+  function startThinkTicker() {
+    stopThinkTicker();
+    thinkTimer = setInterval(function () {
+      const w = pickWord() + "…";
+      if (thinkingEl) {
+        const t = thinkingEl.querySelector(".thought");
+        if (t) t.textContent = w;
+      }
+      if (workLabel) workLabel.textContent = w;
+    }, 1800);
+  }
+  function stopThinkTicker() {
+    if (thinkTimer) {
+      clearInterval(thinkTimer);
+      thinkTimer = null;
+    }
+  }
   function clearThinking() {
+    // Only remove the inline "Thinking…" step. The rotating ticker stays alive —
+    // it now drives the persistent #workstatus pill, controlled by setStreaming.
     if (thinkingEl) {
       thinkingEl.remove();
       thinkingEl = null;
@@ -201,13 +243,9 @@
     pendingImages = [];
     renderChips();
     resize();
-    setStreaming(true);
+    setStreaming(true); // shows the persistent #workstatus pill — no inline duplicate
     curText = null;
     curRaw = "";
-    thinkingEl = document.createElement("div");
-    thinkingEl.className = "step thinking";
-    thinkingEl.innerHTML = '<span class="dot run"></span><span class="thought">Thinking…</span>';
-    log.appendChild(thinkingEl);
     scrollPin();
     vscode.postMessage({
       type: "chat",
@@ -301,7 +339,8 @@
       }
       return;
     }
-    if (!todoPanel) {
+    const isNew = !todoPanel;
+    if (isNew) {
       todoPanel = document.createElement("div");
       todoPanel.className = "todo";
     }
@@ -333,7 +372,9 @@
           );
         })
         .join("");
-    log.appendChild(todoPanel); // re-append => move to bottom so the latest state stays in view
+    // Append only once at its natural spot; update in place afterwards so the
+    // panel doesn't jump around the conversation on every status change.
+    if (isNew) log.appendChild(todoPanel);
     scroll();
   }
 
@@ -376,6 +417,13 @@
     if (/\s/.test(between)) return null;
     return { at, q: between.toLowerCase() };
   }
+  let lastFilesReq = 0;
+  function refreshFilesThrottled() {
+    const now = Date.now();
+    if (now - lastFilesReq < 1200) return; // avoid spamming on every keystroke
+    lastFilesReq = now;
+    vscode.postMessage({ type: "listFiles" });
+  }
   function showMentions() {
     const m = atQuery();
     if (!m) {
@@ -383,6 +431,9 @@
       mStart = -1;
       return;
     }
+    // Pull a fresh file list so newly-created files show up without reopening
+    // the panel; the "files" handler re-renders this menu when it arrives.
+    refreshFilesThrottled();
     mStart = m.at;
     mEntries = files.filter((f) => f.toLowerCase().includes(m.q)).slice(0, 12);
     if (!mEntries.length) {
@@ -737,6 +788,10 @@
     else send();
   };
   function stopRun() {
+    if (doneTimer) {
+      clearTimeout(doneTimer);
+      doneTimer = null;
+    }
     vscode.postMessage({ type: "stop" });
     setStreaming(false);
     clearThinking();
@@ -1371,15 +1426,27 @@
 
   window.addEventListener("message", function (e) {
     const m = e.data;
+    // Any sign of ongoing work re-arms the busy pill and cancels a pending "done"
+    // — the engine emits agent_end (chatDone) after EVERY tool round, not just the
+    // final one, so without this the pill/stop-button flickers off mid-task.
+    if (
+      m.type === "chatDelta" ||
+      m.type === "chatReason" ||
+      m.type === "toolStart" ||
+      m.type === "toolEnd"
+    ) {
+      if (doneTimer) {
+        clearTimeout(doneTimer);
+        doneTimer = null;
+      }
+      if (!streaming) setStreaming(true);
+    }
     if (m.type === "chatDelta") {
       clearThinking();
-      // The real answer is starting — fold away any live thinking block so it
-      // doesn't blend into the output. It stays foldable above for reference.
+      // Answer started — close the live reasoning stream but KEEP it visible
+      // (distinct dim block above the answer). User can fold it via its header.
       const lr = log.querySelector(".reason.live");
-      if (lr) {
-        lr.classList.remove("live");
-        lr.classList.add("collapsed");
-      }
+      if (lr) lr.classList.remove("live");
       if (!curText) {
         curText = newText();
         curRaw = "";
@@ -1438,15 +1505,23 @@
         scroll();
       }
     } else if (m.type === "chatDone") {
-      setStreaming(false);
-      clearThinking();
-      closeAsk();
+      // Don't go idle immediately — agent_end fires per tool round. Wait a beat;
+      // if new activity arrives (handled above) this timer is cancelled and we
+      // stay busy. Only a real, sustained stop finalizes the turn.
       const live = log.querySelector(".reason.live");
-      if (live) {
-        live.classList.remove("live");
-        live.classList.add("collapsed");
-      }
+      if (live) live.classList.remove("live"); // keep visible; user folds manually
+      if (doneTimer) clearTimeout(doneTimer);
+      doneTimer = setTimeout(function () {
+        doneTimer = null;
+        setStreaming(false);
+        clearThinking();
+        closeAsk();
+      }, 1500);
     } else if (m.type === "chatError") {
+      if (doneTimer) {
+        clearTimeout(doneTimer);
+        doneTimer = null;
+      }
       clearThinking();
       fresh();
       closeAsk();
@@ -1464,6 +1539,8 @@
       welcome();
     } else if (m.type === "files") {
       files = m.list || [];
+      // If the mention menu is open, re-render it with the fresh list.
+      if (menu.style.display === "block") showMentions();
     } else if (m.type === "models") {
       modelProvider = m.provider || "bynara";
       const prev = modelSel.value;
