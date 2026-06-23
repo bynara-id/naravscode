@@ -665,6 +665,11 @@
   }
   function renderAgentPicker(list, saved) {
     let body = '<div class="picklist">';
+    if (list && list.length) {
+      // Bulk option — set every subagent to one model in a single pick.
+      body +=
+        '<button class="pickrow allrow" data-agent="__all__"><span class="aname">★ All subagents</span><span class="amodel">set every one</span></button>';
+    }
     if (!list || !list.length) body += '<div class="udesc">No subagents found.</div>';
     (list || []).forEach(function (ag) {
       body +=
@@ -697,7 +702,7 @@
         "</span></button>";
     });
     body += "</div>";
-    const mo = openModal("Model for " + agent, body);
+    const mo = openModal(agent === "__all__" ? "Model for ALL subagents" : "Model for " + agent, body);
     [...mo.querySelectorAll(".pickrow")].forEach(
       (b) =>
         (b.onclick = () => {

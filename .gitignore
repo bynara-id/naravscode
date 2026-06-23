@@ -5,3 +5,9 @@ node_modules
 dist
 *.vsix
 package-lock.json
+
+# private/internal docs
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.agents/

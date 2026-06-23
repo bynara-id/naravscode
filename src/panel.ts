@@ -718,11 +718,18 @@ export function openChatPanel(
           return;
         }
         if (ev.type === "tool_execution_start") {
+          // A tool runs between narration chunks. In the live view the tool step
+          // visually splits them; in the SAVED transcript there's no such marker,
+          // so insert a paragraph break + a tool line — otherwise restoring an old
+          // session renders all narration as one run-on wall of text.
+          if (asstAcc && !asstAcc.endsWith("\n")) asstAcc += "\n\n";
+          const sum = toolSummary(ev.toolName, ev.args);
+          asstAcc += `\`${ev.toolName}\`${sum ? " " + sum : ""}\n\n`;
           post({
             type: "toolStart",
             id: ev.toolCallId,
             name: ev.toolName,
-            summary: toolSummary(ev.toolName, ev.args),
+            summary: sum,
           });
           return;
         }
@@ -840,8 +847,13 @@ export function openChatPanel(
         typeof msg.model === "string"
       ) {
         try {
-          setAgentModel(msg.name, msg.model);
-          post({ type: "agents", list: listAgents(), saved: msg.name });
+          if (msg.name === "__all__") {
+            for (const ag of listAgents()) setAgentModel(ag.name, msg.model);
+            post({ type: "agents", list: listAgents() });
+          } else {
+            setAgentModel(msg.name, msg.model);
+            post({ type: "agents", list: listAgents(), saved: msg.name });
+          }
         } catch (e: any) {
           post({
             type: "chatError",
@@ -1347,6 +1359,8 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .mcpx { flex: none; background: transparent; border: none; color: var(--vscode-foreground); opacity: .5; cursor: pointer; font-size: 13px; }
   .mcpx:hover { opacity: 1; color: var(--vscode-errorForeground); }
   .pickrow.mcpadd { margin-top: 6px; justify-content: center; color: var(--nry); }
+  .pickrow.allrow { border-color: var(--nry); background: var(--nry-soft); margin-bottom: 6px; }
+  .pickrow.allrow .aname { color: var(--nry); font-weight: 600; }
   /* custom model dropdown with provider icons */
   .msel { display: inline-flex; align-items: center; gap: 6px; max-width: 190px; background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border)); border-radius: 5px; padding: 2px 6px 2px 5px; font-size: 11px; cursor: pointer; }
   .msel:hover { border-color: var(--nry); }
