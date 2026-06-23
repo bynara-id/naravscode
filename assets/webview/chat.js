@@ -19,6 +19,7 @@
   const todoIds = {}; // todo tool-call ids, rendered as one live checklist instead of stacked boxes
   let todoPanel = null;
   let doneTimer = null; // grace timer before treating the turn as fully idle
+  let lastActivity = Date.now(); // last time the engine sent anything (for stall hint)
   const workStatus = document.getElementById("workstatus");
   const workLabel = workStatus && workStatus.querySelector(".wlabel");
   function setStreaming(on) {
@@ -193,7 +194,11 @@
   function startThinkTicker() {
     stopThinkTicker();
     thinkTimer = setInterval(function () {
-      const w = pickWord() + "…";
+      // No engine output for a while → likely stalled. Tell the user instead of
+      // cheerfully rotating words while nothing happens.
+      const idleMs = Date.now() - lastActivity;
+      const w = idleMs > 25000 ? "No response " + Math.round(idleMs / 1000) + "s — click Stop to retry" : pickWord() + "…";
+      if (workStatus) workStatus.classList.toggle("stalled", idleMs > 25000);
       if (thinkingEl) {
         const t = thinkingEl.querySelector(".thought");
         if (t) t.textContent = w;
@@ -243,6 +248,7 @@
     pendingImages = [];
     renderChips();
     resize();
+    lastActivity = Date.now();
     setStreaming(true); // shows the persistent #workstatus pill — no inline duplicate
     curText = null;
     curRaw = "";
@@ -1426,6 +1432,7 @@
 
   window.addEventListener("message", function (e) {
     const m = e.data;
+    lastActivity = Date.now(); // any engine message counts as a sign of life
     // Any sign of ongoing work re-arms the busy pill and cancels a pending "done"
     // — the engine emits agent_end (chatDone) after EVERY tool round, not just the
     // final one, so without this the pill/stop-button flickers off mid-task.

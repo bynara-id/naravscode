@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import * as vscode from "vscode";
 import {
@@ -153,6 +153,44 @@ async function fetchAccount(): Promise<{ ok: boolean; data?: any; error?: string
   } catch (e: any) {
     return { ok: false, error: String(e?.message ?? e) };
   }
+}
+
+// Extension + CLI versions, surfaced in the Account view.
+function extVersion(extensionUri: vscode.Uri): string {
+  try {
+    return JSON.parse(readFileSync(join(extensionUri.fsPath, "package.json"), "utf8")).version || "";
+  } catch {
+    return "";
+  }
+}
+let cliVersionCache: string | undefined;
+// The `naracli` binary is a shim; `--version` prints the engine (pi) version, not
+// ours. Read the bynara-cli package.json next to the resolved binary instead.
+function cliVersion(): string {
+  if (cliVersionCache !== undefined) return cliVersionCache;
+  cliVersionCache = "";
+  try {
+    const dir = dirname(findPiBinary());
+    const candidates = [
+      join(dir, "node_modules", "bynara-cli", "package.json"), // npm global
+      join(dir, "..", "lib", "node_modules", "bynara-cli", "package.json"),
+      join(dir, "..", "install", "global", "node_modules", "bynara-cli", "package.json"), // bun
+    ];
+    for (const c of candidates) {
+      try {
+        const v = JSON.parse(readFileSync(c, "utf8")).version;
+        if (v) {
+          cliVersionCache = v;
+          break;
+        }
+      } catch {
+        /* try next */
+      }
+    }
+  } catch {
+    /* leave empty */
+  }
+  return cliVersionCache ?? "";
 }
 
 interface SessionInfo {
@@ -524,9 +562,17 @@ export function openChatPanel(
         env: { ...process.env, ...createPiEnvironment(getBridgeConfig()) },
         stdio: ["pipe", "pipe", "pipe"],
       });
-      child.stderr?.on("data", (d) =>
-        chatOut!.appendLine(`[stderr] ${d.toString().trimEnd()}`),
-      );
+      // Keep the last few stderr lines so a crash can show WHY in the chat itself
+      // (not just buried in the Output channel).
+      const stderrTail: string[] = [];
+      child.stderr?.on("data", (d) => {
+        const text = d.toString().trimEnd();
+        chatOut!.appendLine(`[stderr] ${text}`);
+        for (const ln of text.split("\n")) {
+          if (ln.trim()) stderrTail.push(ln.trim());
+        }
+        while (stderrTail.length > 12) stderrTail.shift();
+      });
       const decoder = new StringDecoder("utf8");
       let buf = "";
       child.stdout?.on("data", (chunk) => {
@@ -548,7 +594,17 @@ export function openChatPanel(
       child.on("close", (code) => {
         chatOut!.appendLine(`[chat] closed (${code})`);
         child = undefined;
-        post({ type: "chatDone" });
+        // Clean exit -> just finish the turn. Crash -> surface the reason in the
+        // chat so the user isn't left staring at a silently-stopped run.
+        if (code === 0 || code === null) {
+          post({ type: "chatDone" });
+        } else {
+          const why = stderrTail.length ? "\n" + stderrTail.slice(-6).join("\n") : "";
+          post({
+            type: "chatError",
+            error: `ByNara engine stopped unexpectedly (exit ${code}).${why}\nOpen "ByNara" in the Output panel for the full log.`,
+          });
+        }
       });
       child.on("error", (e) => {
         chatOut!.appendLine(`[chat] error ${String(e?.message ?? e)}`);
@@ -900,8 +956,23 @@ export function openChatPanel(
         // Multi-tab: open a fresh, isolated chat tab instead of wiping this one.
         openChatPanel(extensionUri, getBridgeConfig, { fresh: true });
       } else if (msg?.type === "stop") {
-        // Graceful: abort the current run but keep the session/child alive.
-        if (child) send({ id: `a${Date.now()}`, type: "abort" });
+        // Graceful abort first; if the engine is hung and ignores it, hard-kill
+        // the child shortly after so the NEXT message can spawn a fresh engine.
+        // Conversation context isn't lost — it resumes from the --session file.
+        if (child) {
+          const c = child;
+          send({ id: `a${Date.now()}`, type: "abort" });
+          setTimeout(() => {
+            if (child === c) {
+              try {
+                c.kill();
+              } catch {
+                /* ignore */
+              }
+              child = undefined;
+            }
+          }, 1200);
+        }
       }
     });
 
@@ -986,7 +1057,11 @@ export function createByNaraPanelProvider(
             break;
           }
           case "refreshAccount":
-            view.webview.postMessage({ type: "account", result: await fetchAccount() });
+            view.webview.postMessage({
+              type: "account",
+              result: await fetchAccount(),
+              versions: { ext: extVersion(extensionUri), cli: cliVersion() },
+            });
             break;
           case "signOut": {
             const ok = await vscode.window.showWarningMessage(
@@ -1089,7 +1164,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   .reason.collapsed .rhead::after { content: " ▸"; }
   .reason .rbody { opacity: .5; font-style: italic; font-size: 12.5px; margin-top: 3px; white-space: pre-wrap; }
   .reason.collapsed .rbody { display: none; }
-  .errline { color: var(--vscode-errorForeground); font-size: 12px; margin: 4px 0; }
+  .errline { color: var(--vscode-errorForeground); font-size: 12px; margin: 8px 0; white-space: pre-wrap; font-family: var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background, rgba(224,108,108,.1)); border: 1px solid var(--vscode-errorForeground); border-radius: 6px; padding: 8px 10px; }
   .toolimg { max-width: 100%; border-radius: 6px; margin: 4px 0; }
   .todo { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--vscode-panel-border); border-radius: 8px; background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.08)); font-size: 12.5px; }
   .todo-h { font-weight: 600; margin-bottom: 6px; display: flex; gap: 8px; align-items: center; }
@@ -1119,6 +1194,7 @@ function chatHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   textarea { width: 100%; resize: none; background: transparent; color: var(--vscode-input-foreground); border: none; outline: none; font-family: inherit; font-size: inherit; max-height: 200px; padding: 2px; }
   #workstatus { display: none; align-items: center; gap: 8px; width: fit-content; margin: 0 auto 6px; padding: 4px 12px; border-radius: 999px; background: var(--vscode-badge-background, rgba(45,123,255,.16)); color: var(--vscode-badge-foreground, #4da3ff); font-size: 12px; font-weight: 500; }
   #workstatus.on { display: flex; }
+  #workstatus.stalled { background: var(--vscode-inputValidation-warningBackground, rgba(224,163,62,.18)); color: var(--vscode-inputValidation-warningForeground, #e0a33e); }
   #workstatus .wdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: wpulse 1s ease-in-out infinite; }
   @keyframes wpulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
   .chips { display: none; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
@@ -1404,7 +1480,7 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
 <script nonce="${n}">
   const vscode = acquireVsCodeApi();
   const IC = ${JSON.stringify(ICONS)};
-  let sessions = [], src = 'editor';
+  let sessions = [], src = 'editor', lastVersions = {};
   // Persist the "show all folders" preference in webview state so it survives reloads.
   let showAll = !!(vscode.getState && vscode.getState() || {}).showAll;
   const refreshSess = () => vscode.postMessage({ type: 'refreshSessions', source: src, showAll });
@@ -1457,7 +1533,9 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
       ['Quota', q.limit>0 ? num(q.remaining)+' / '+num(q.limit)+' '+(q.unit||'tokens') : 'fair-use'],
       ['Tokens today',num(u.tokens_today)],['Tokens month',num(u.tokens_month)],
       ['Requests today',num(u.requests_today)],['Success rate', typeof u.success_rate==='number'?Math.round(u.success_rate*100)+'%':'—'],
-      ['Models', Array.isArray(s.models)?s.models.length:0]];
+      ['Models', Array.isArray(s.models)?s.models.length:0],
+      ['Extension', 'v'+(lastVersions.ext||'—')],
+      ['CLI', lastVersions.cli ? 'v'+lastVersions.cli : '—']];
     box.innerHTML = '<h3>Account</h3>'+rows.map(([k,v])=>'<div class="row"><span class="k">'+k+'</span><span class="v">'+String(v).replace(/</g,'&lt;')+'</span></div>').join('');
   }
   document.getElementById('refreshAcc').onclick = () => vscode.postMessage({ type: 'refreshAccount' });
@@ -1472,7 +1550,7 @@ function sidebarHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string 
   window.addEventListener('message', e => {
     const m = e.data;
     if (m.type === 'sessions') { sessions = m.list||[]; renderSessions(); }
-    else if (m.type === 'account') renderAccount(m.result);
+    else if (m.type === 'account') { lastVersions = m.versions || lastVersions; renderAccount(m.result); }
     else if (m.type === 'auth') applyAuth(!!m.signedIn);
   });
   vscode.postMessage({ type: 'ready' });
